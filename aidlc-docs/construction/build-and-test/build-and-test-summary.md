@@ -1,7 +1,7 @@
 # 빌드 및 테스트 요약 (Build and Test Summary)
 # CLI Execution Platform - Backend MVP
 
-> 실행 일시: 2026-06-19T14:52:04+09:00  
+> 실행 일시: 2026-06-19T17:09:00+09:00  
 > 실행 명령: `python -m pytest`  
 
 ## 개요
@@ -17,8 +17,8 @@
 | Unit 2: Parser & Policy Validator Service | `test_unit_2.py` | 5 | 5 | 0 | ✅ PASS |
 | Unit 3: CLI Runner Service | `test_unit_3.py` | 8 | 8 | 0 | ✅ PASS |
 | Unit 4: SSE Streaming & Event Catch-up | `test_unit_4.py` | 16 | 16 | 0 | ✅ PASS |
-| Unit 5: Iterative Refinement Orchestrator | `test_unit_5.py` | 12 | 12 | 0 | ✅ PASS |
-| **합계** | | **45** | **45** | **0** | ✅ **ALL PASS** |
+| Unit 5: Iterative Refinement Orchestrator | `test_unit_5.py` | 13 | 13 | 0 | ✅ PASS |
+| **합계** | | **46** | **46** | **0** | ✅ **ALL PASS** |
 
 ## 핵심 비즈니스 시나리오 및 NFR 검증 요약
 
@@ -27,13 +27,15 @@
 - **US-3-1 & Q2 (CLI Execution)**: OpenSCAD CLI 안전 실행, 특수문자를 이용한 OS Command Injection 방어 인자 Allowlist 검사, 타임아웃(30초) 강제 종료 및 부분 실행 결과 EventLog DB 기록 보존 검증 완료.
 - **Unit 4 (SSE Streaming)**: SSE 통신 토큰 검증, 분실된 실시간 이벤트를 복원하는 `Last-Event-ID` 기반의 Catch-up 메커니즘, 10분 초과 세션 재연결, 최대 동시 커넥션(20개) 제한 및 DB 일시 장애 지수 백오프 재시도 검증 완료.
 - **Unit 5 (Orchestration & Refinement)**: 완료된 부모 Job에 기반한 refinement API 및 자식 Job 연동, Workspace 컨텍스트 상속(최대 5MB 제한), 120초 LLM 요청 타임아웃 및 최대 2회 재시도, 프로세스 로컬 동시 2개 작업 제한(Semaphore) 및 10분 wait timeout, 15분 경과 stale RUNNING Job 자동 실패 복구(lifespan) 검증 완료.
+- **KST DB 타임존 (R-8)**: PostgreSQL 연결 시 `connect_args`를 통해 타임존을 `Asia/Seoul`로 주입하고, SQLite 로컬 개발/테스트 환경에서 예외 없이 안전하게 통과됨을 입증함.
+- **OpenAI 호환 페이로드 (R-9)**: `chat/completions` endpoint를 자동으로 감지하여 표준 OpenAI `messages` 페이로드로 가공해 호출하고 `choices` 응답 구조를 파싱하는 신규 비동기 테스트 케이스(`test_llm_client_openai_format`) 통과.
 
 ## 현재 전체 상태
 
 | 항목 | 상태 |
 |---|---|
 | 전체 빌드 및 컴파일 | 성공 (FastAPI, SQLAlchemy) |
-| 전체 테스트 통과율 | 100% (45/45 passed) |
+| 전체 테스트 통과율 | 100% (46/46 passed) |
 | 미해결 회귀 오류 | 없음 |
 | Operations 진행 준비 | **Yes** |
 

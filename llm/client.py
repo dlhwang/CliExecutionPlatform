@@ -53,13 +53,35 @@ class HttpLLMClient:
         self._timeout = httpx.Timeout(timeout_seconds)
 
     async def generate_plan(self, request: LLMRequest) -> str:
-        payload = {
-            "model": self._model,
-            "prompt": request.prompt,
-            "context": request.context,
-            "allowed_actions": list(request.allowed_actions),
-            "retry_feedback": request.retry_feedback,
-        }
+        if "chat/completions" in self._endpoint:
+            prompt_content = request.prompt
+            if request.context:
+                context_str = "\n".join(f"[{filename}]:\n{content}" for filename, content in request.context.items())
+                prompt_content += f"\n\nContext files:\n{context_str}"
+            if request.retry_feedback:
+                prompt_content += f"\n\nRetry Feedback:\n{request.retry_feedback}"
+
+            system_prompt = (
+                "You are an assistant that plans file operations and tool executions to solve user requests.\n"
+                f"You must generate a list of actions. Allowed actions: {', '.join(request.allowed_actions)}.\n"
+                "Your response must be a JSON array containing the action plan inside a ```json ``` block, or just the JSON array itself."
+            )
+
+            payload = {
+                "model": self._model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt_content}
+                ]
+            }
+        else:
+            payload = {
+                "model": self._model,
+                "prompt": request.prompt,
+                "context": request.context,
+                "allowed_actions": list(request.allowed_actions),
+                "retry_feedback": request.retry_feedback,
+            }
         try:
             async with self._client.stream(
                 "POST",
@@ -99,7 +121,10 @@ class HttpLLMClient:
 
         try:
             document = json.loads(bytes(body).decode("utf-8"))
-            content = document["content"]
+            if "choices" in document and len(document["choices"]) > 0:
+                content = document["choices"][0]["message"]["content"]
+            else:
+                content = document["content"]
             if not isinstance(content, str):
                 raise TypeError("content must be a string")
             return content

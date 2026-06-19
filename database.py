@@ -12,6 +12,11 @@ DATABASE_URL = os.getenv(
     "postgresql://postgres:postgres@localhost:5432/cli_platform"
 )
 
+# PostgreSQL인 경우 KST 타임존 적용, SQLite 등 타임존 옵션을 지원하지 않는 DB는 제외
+connect_args = {}
+if DATABASE_URL.startswith("postgresql"):
+    connect_args = {"options": "-c timezone=Asia/Seoul"}
+
 # SQLAlchemy 엔진 생성 (비기능 설계에 정의된 Connection Pool 매개변수 적용)
 engine = create_engine(
     DATABASE_URL,
@@ -20,6 +25,7 @@ engine = create_engine(
     pool_timeout=30.0,    # 커넥션 획득 대기 타임아웃
     pool_recycle=1800,    # 커넥션 재사용 한도 시간 (30분)
     pool_pre_ping=True,   # 커넥션 생존 사전 확인 활성화 (DB 순단 현상 방어)
+    connect_args=connect_args,
 )
 
 # 데이터베이스 세션 생성기

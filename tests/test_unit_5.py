@@ -254,3 +254,27 @@ def test_stale_running_jobs_recovered_at_startup(db_session):
     assert db_session.get(Job, stale.id).status == "FAILED"
     assert db_session.get(Job, recent.id).status == "RUNNING"
     assert db_session.query(EventLog).filter(EventLog.job_id == stale.id).count() == 1
+
+
+def test_llm_client_openai_format():
+    import json
+    async def scenario():
+        called_with_payload = None
+        async def mock_handler(request):
+            nonlocal called_with_payload
+            called_with_payload = json.loads(request.read())
+            return httpx.Response(200, json={"choices": [{"message": {"content": "[]"}}]})
+            
+        client = httpx.AsyncClient(transport=httpx.MockTransport(mock_handler))
+        adapter = HttpLLMClient(client, "https://api.openai.com/v1/chat/completions", "secret", "model")
+        res = await adapter.generate_plan(LLMRequest("p", {"a.txt": "aa"}, ("WRITE_FILE",)))
+        assert res == "[]"
+        assert "messages" in called_with_payload
+        assert called_with_payload["model"] == "model"
+        assert called_with_payload["messages"][0]["role"] == "system"
+        assert called_with_payload["messages"][1]["role"] == "user"
+        assert "[a.txt]" in called_with_payload["messages"][1]["content"]
+        await client.aclose()
+
+    asyncio.run(scenario())
+

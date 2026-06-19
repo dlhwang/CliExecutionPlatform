@@ -1,7 +1,7 @@
 # AI-DLC State Tracking
 
 ## Project Information
-- **Project Type**: Greenfield
+- **Project Type**: Brownfield (Hotfix Mode)
 - **Start Date**: 2026-06-18T16:09:24+09:00
 - **Current Stage**: OPERATIONS - Lifecycle Completed
 
