@@ -1,0 +1,134 @@
+from collections.abc import Callable
+from uuid import UUID
+
+from sqlalchemy.orm import Session
+
+from llm.client import LLMClient, LLMRequest
+from llm.parser import ActionPlanParser
+from llm.retry import LLMPlanRetryExecutor
+from llm.validator import SecurityPolicyValidator
+from orchestrator.actions import ActionExecutor
+from orchestrator.concurrency import (
+    OrchestrationConcurrencyGate,
+    OrchestrationQueueTimeoutError,
+)
+from orchestrator.repository import OrchestratorRepository
+from storage.interface import StorageService
+
+INHERITED_FILES = ("model.scad", "design-spec.md")
+ALLOWED_ACTIONS = (
+    "CREATE_DIRECTORY",
+    "WRITE_FILE",
+    "RUN_TOOL",
+    "CREATE_ARTIFACT",
+)
+
+
+class JobOrchestratorService:
+    def __init__(
+        self,
+        repository: OrchestratorRepository,
+        session_factory: Callable[[], Session],
+        storage: StorageService,
+        llm_client: LLMClient,
+        parser: ActionPlanParser,
+        validator: SecurityPolicyValidator,
+        action_executor: ActionExecutor,
+        concurrency_gate: OrchestrationConcurrencyGate,
+    ):
+        self._repository = repository
+        self._session_factory = session_factory
+        self._storage = storage
+        self._llm_client = llm_client
+        self._parser = parser
+        self._validator = validator
+        self._action_executor = action_executor
+        self._gate = concurrency_gate
+
+    async def run(self, job_id: UUID) -> bool:
+        try:
+            async with self._gate.slot():
+                return await self._run_in_slot(job_id)
+        except OrchestrationQueueTimeoutError:
+            self._repository.transition(
+                job_id,
+                ("CREATED",),
+                "FAILED",
+                "ORCHESTRATION_QUEUE_TIMEOUT",
+                "Job exceeded the orchestration queue wait limit.",
+            )
+            return False
+
+    async def _run_in_slot(self, job_id: UUID) -> bool:
+        if not self._repository.transition(
+            job_id,
+            ("CREATED",),
+            "RUNNING",
+            "ORCHESTRATION_STARTED",
+            "Orchestration started.",
+        ):
+            return False
+
+        try:
+            job = self._repository.get_job(job_id)
+            if job is None:
+                raise RuntimeError("Job disappeared after orchestration start.")
+
+            context = {}
+            if job.parent_job_id is not None:
+                for filename in INHERITED_FILES:
+                    self._storage.copy_workspace_file(job.parent_job_id, job.id, filename)
+                    context[filename] = self._storage.read_file(job.id, filename).decode("utf-8")
+                self._repository.append_event(
+                    job_id,
+                    "REFINEMENT_CONTEXT_COPIED",
+                    "Parent design context copied.",
+                )
+
+            request = LLMRequest(
+                prompt=job.prompt,
+                context=context,
+                allowed_actions=ALLOWED_ACTIONS,
+            )
+            retry_executor = LLMPlanRetryExecutor(
+                self._llm_client,
+                self._parser,
+                on_attempt=lambda attempt: self._repository.append_event(
+                    job_id,
+                    "LLM_ATTEMPT",
+                    f"LLM plan request attempt {attempt}.",
+                ),
+            )
+            actions = await retry_executor.generate_actions(request)
+
+            db = self._session_factory()
+            try:
+                self._validator.validate_actions(actions, job_id, db)
+            finally:
+                db.close()
+
+            self._repository.save_action_plan(job_id, actions)
+            self._repository.append_event(
+                job_id,
+                "PLAN_VALIDATED",
+                "Action plan validated.",
+            )
+            await self._action_executor.execute(job_id, actions)
+            self._repository.transition(
+                job_id,
+                ("RUNNING",),
+                "COMPLETED",
+                "ORCHESTRATION_COMPLETED",
+                "Orchestration completed.",
+            )
+            return True
+        except Exception as exc:
+            self._repository.transition(
+                job_id,
+                ("CREATED", "RUNNING"),
+                "FAILED",
+                "ORCHESTRATION_FAILED",
+                f"Orchestration failed: {type(exc).__name__}.",
+            )
+            return False
+
