@@ -215,3 +215,99 @@ def test_security_validator_tool_whitelist(db_session):
     # 2) 대소문자 무관 openscad 허용 검증
     good_tool_action = [RunToolAction(action="RUN_TOOL", tool_name="OpenSCAD", args=["model.scad"])]
     validator.validate_actions(good_tool_action, job_id, db_session)
+
+
+def test_scad_static_validation_rejects_vector_property_access():
+    from llm.scad_validator import ScadStaticValidator
+    # v.x, v.y, v.z 같은 속성 접근은 차단되어야 함
+    content = "cube([10, 20, 30]);\nvector = [1, 2, 3];\necho(vector.x);"
+    with pytest.raises(LLMPlanValidationError) as exc_info:
+        ScadStaticValidator.validate(content)
+    assert "[SCAD_VECTOR_PROPERTY_ACCESS]" in exc_info.value.message
+
+
+def test_scad_static_validation_rejects_single_quotes():
+    from llm.scad_validator import ScadStaticValidator
+    # 싱글 쿼트(') 차단 검증
+    content = "cube([10, 20, 30]);\ntext('hello');"
+    with pytest.raises(LLMPlanValidationError) as exc_info:
+        ScadStaticValidator.validate(content)
+    assert "[SCAD_SINGLE_QUOTE]" in exc_info.value.message
+
+
+def test_scad_static_validation_rejects_180_div_pi():
+    from llm.scad_validator import ScadStaticValidator
+    # 180 / PI 차단 검증
+    content = "cube([10, 20, 30]);\nangle = atan2(1, 1) * 180 / PI;"
+    with pytest.raises(LLMPlanValidationError) as exc_info:
+        ScadStaticValidator.validate(content)
+    assert "[SCAD_RADIAN_CONVERSION]" in exc_info.value.message
+
+
+def test_scad_static_validation_rejects_pi_div_180():
+    from llm.scad_validator import ScadStaticValidator
+    # PI / 180 차단 검증
+    content = "cube([10, 20, 30]);\nangle = 45 * PI / 180;"
+    with pytest.raises(LLMPlanValidationError) as exc_info:
+        ScadStaticValidator.validate(content)
+    assert "[SCAD_RADIAN_CONVERSION]" in exc_info.value.message
+
+
+def test_scad_static_validation_rejects_markdown_fence():
+    from llm.scad_validator import ScadStaticValidator
+    # 마크다운 코드 펜스 ``` 차단 검증
+    content = "```openscad\ncube([10, 20, 30]);\n```"
+    with pytest.raises(LLMPlanValidationError) as exc_info:
+        ScadStaticValidator.validate(content)
+    assert "[SCAD_MARKDOWN_FENCE]" in exc_info.value.message
+
+
+def test_scad_static_validation_rejects_prose():
+    from llm.scad_validator import ScadStaticValidator
+    # prose 설명글 차단 검증
+    content = "Here is the code for the dice:\ncube([10, 20, 30]);"
+    with pytest.raises(LLMPlanValidationError) as exc_info:
+        ScadStaticValidator.validate(content)
+    assert "[SCAD_PROSE]" in exc_info.value.message
+
+
+def test_scad_static_validation_rejects_empty_file():
+    from llm.scad_validator import ScadStaticValidator
+    # 빈 파일 차단 검증
+    with pytest.raises(LLMPlanValidationError) as exc_info:
+        ScadStaticValidator.validate("")
+    assert "[SCAD_EMPTY_FILE]" in exc_info.value.message
+
+
+def test_scad_static_validation_rejects_missing_scad_keyword():
+    from llm.scad_validator import ScadStaticValidator
+    # 키워드 없음 차단 검증
+    content = "a = 1;\nb = 2;"
+    with pytest.raises(LLMPlanValidationError) as exc_info:
+        ScadStaticValidator.validate(content)
+    assert "[SCAD_MISSING_KEYWORD]" in exc_info.value.message
+
+
+def test_scad_static_validation_accepts_valid_scad():
+    from llm.scad_validator import ScadStaticValidator
+    # 정상 스캐드 허용 검증
+    content = 'cube([10, 20, 30]);\ntranslate([1, 2, v[0]]) sphere(d=10);\ntext("hello");'
+    # 예외가 발생하지 않아야 함
+    ScadStaticValidator.validate(content)
+
+
+def test_scad_static_validation_ignores_comment_only_forbidden_patterns():
+    from llm.scad_validator import ScadStaticValidator
+    # 주석 내부의 금지 구문 무시 검증 (예: // v.x 또는 /* text('hello') */)
+    content = """
+    // v.x
+    /* 
+       text('hello') 
+       Here is
+       180 / PI
+    */
+    cube([10, 20, 30]);
+    """
+    # 주석이 제거된 뒤에는 cube 키워드만 남고 금지 구문은 없어야 하므로 예외가 발생하지 않아야 함
+    ScadStaticValidator.validate(content)
+

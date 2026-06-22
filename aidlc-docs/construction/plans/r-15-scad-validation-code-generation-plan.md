@@ -1,0 +1,79 @@
+# Code Generation Plan - Hotfix R-15 (OpenSCAD 코드 생성 제약 강화 및 SCAD 정적 검증기 추가)
+
+본 계획서는 R-15 핫픽스의 요구사항 구현을 순차적으로 진행하기 위한 상세 코드 생성 계획입니다. 이 문서가 코드 생성 과정의 단일 진실 공급원(Single Source of Truth)으로 사용됩니다.
+
+## 1. Unit Context & Details
+
+- **대상 영역**: LLM Client, Retry Executor, Security Validator, Unit Test
+- **목적**: 
+  - LLM에게 마크다운 펜스, prose, vector 속성 접근 금지 및 trigonometric degree 준수를 강제하는 prompt 최적화. (단, JSON Action Plan 스키마는 훼손되지 않도록 `.scad` 파일 내용 내부에만 적용)
+  - LLM이 plan을 리턴하여 parsing 및 validation하는 단계에서 scad 구문에 대한 정적 검증(Lightweight Static Validation) 수행.
+  - 검증 위반 시 `LLMPlanValidationError`를 던져 refinement loop에 에러 피드백을 전달하여 llm이 다시 작성하도록 유도.
+- **예외 전이 및 단일화**: 
+  - `LLMPlanRetryExecutor`에 `validation_cb` 콜백을 주입하여 `SecurityPolicyValidator.validate_actions` 내부로 검증 호출 위치 단일화.
+  - 콜백 검증 과정에서 scad 구문 위반 시 `LLMPlanValidationError` 발생.
+  - `LLMPlanRetryExecutor`가 이를 catch하여 `feedback = exc.message` 형태로 refinement 피드백 루프에 전달.
+
+---
+
+## 2. Code Generation Checklists
+
+- [x] **Step 1: Scad 정적 검증 모듈 추가**
+  - 파일 경로: [llm/scad_validator.py](file:///d:/workspace/CLI-Execution-Platform/llm/scad_validator.py) [NEW]
+  - 구현 내용: 
+    - `strip_comments(content)`: double-quoted string을 온전히 인식하여 문자열 내부의 `//` 또는 `/* */`가 오인 제거되지 않도록 문자 단위 순회를 도는 상태 머신(State Machine) 구현.
+    - `ScadStaticValidator.validate(content)`: 7대 정적 검사 규칙을 구현하고 에러 시 Rule ID 태그(`[SCAD_SINGLE_QUOTE]`, `[SCAD_VECTOR_PROPERTY_ACCESS]` 등)를 붙인 오류 메시지를 모아 `LLMPlanValidationError` 발생.
+
+- [x] **Step 2: LLM System Prompt 보강**
+  - 파일 경로: [llm/client.py](file:///d:/workspace/CLI-Execution-Platform/llm/client.py) [MODIFY]
+  - 구현 내용: 
+    - `system_prompt` 내 OpenSCAD 액션 생성 가이드 및 RULES 섹션 보강.
+    - 마크다운 펜스 및 prose 설명글 금지 사항은 오직 `.scad` 파일 content 내부에만 적용되며, 전체 JSON Action Plan 스키마는 준수해야 함을 지시.
+
+- [x] **Step 3: Retry Executor Refinement Loop 연동 및 콜백 주입**
+  - 파일 경로: [llm/retry.py](file:///d:/workspace/CLI-Execution-Platform/llm/retry.py) [MODIFY]
+  - 구현 내용:
+    - `generate_actions`의 인자로 `validation_cb: Callable[[Any], None] | None = None`을 받을 수 있도록 확장.
+    - 파싱 성공 직후 `validation_cb`를 수행하여 validation 계층과 동적으로 유연하게 결합.
+    - `except LLMPlanValidationError as exc`를 추가하여, scad 구문 위반을 포함한 validation 실패 시에도 `feedback = exc.message`를 전달해 LLM이 refinement 루프를 타며 코드를 재작성하도록 조치.
+
+- [x] **Step 4: Security Policy Validator에 Scad 검증 추가 및 Service 계층 연동**
+  - 파일 경로: [llm/validator.py](file:///d:/workspace/CLI-Execution-Platform/llm/validator.py) [MODIFY], [orchestrator/service.py](file:///d:/workspace/CLI-Execution-Platform/orchestrator/service.py) [MODIFY]
+  - 구현 내용:
+    - `SecurityPolicyValidator.validate_actions` 내부에서 `WRITE_FILE` 액션 중 `.scad` 파일 확장자인 경우 `ScadStaticValidator.validate(action_obj.content)`를 실행하는 단일 검증 로직 통합.
+    - `JobOrchestratorService._run_in_slot`에서 `validation_cb`를 정의하고 `generate_actions(..., validation_cb=validation_cb)` 형태로 넘김. 기존 외부의 중복 `validate_actions` 호출 제거.
+
+- [x] **Step 5: Scad 정적 검증 유닛 테스트 구현**
+  - 파일 경로: [tests/test_unit_2.py](file:///d:/workspace/CLI-Execution-Platform/tests/test_unit_2.py) [MODIFY]
+  - 구현 내용:
+    - `ScadStaticValidator`의 10대 유닛 테스트 구현:
+      - `test_scad_static_validation_rejects_vector_property_access`
+      - `test_scad_static_validation_rejects_single_quotes`
+      - `test_scad_static_validation_rejects_180_div_pi`
+      - `test_scad_static_validation_rejects_pi_div_180`
+      - `test_scad_static_validation_rejects_markdown_fence`
+      - `test_scad_static_validation_rejects_prose`
+      - `test_scad_static_validation_rejects_empty_file`
+      - `test_scad_static_validation_rejects_missing_scad_keyword`
+      - `test_scad_static_validation_accepts_valid_scad`
+      - `test_scad_static_validation_ignores_comment_only_forbidden_patterns`
+
+- [x] **Step 6: Orchestrator Refinement 통합 테스트 구현**
+  - 파일 경로: [tests/test_unit_5.py](file:///d:/workspace/CLI-Execution-Platform/tests/test_unit_5.py) [MODIFY]
+  - 구현 내용:
+    - refinement 루프가 scad static validation 실패 시 에러 피드백을 전달하고 재시도가 완료되는지 검증하는 `test_orchestrator_refines_when_scad_static_validation_fails` 통합 테스트 작성.
+
+
+- [x] **Step 7: 기존 전체 테스트 + 신규 테스트 전체 통과 확인**
+  - 실행 명령: 
+    - `.\venv\Scripts\python -m pytest tests/ -v`
+  - 확인 사항: 기존 전체 테스트 및 신규 테스트 모두 안전하게 통과하는지 회귀 검증.
+
+
+---
+
+## 3. Story / Requirement Mappings
+
+- **Requirement R-15**:
+  - `llm/scad_validator.py`, `llm/client.py`, `llm/retry.py`, `llm/validator.py`, `orchestrator/service.py` 코드 보완을 통해 단일화된 검증기 구축 및 refinement loop 연동.
+  - `tests/test_unit_2.py`, `tests/test_unit_5.py`에 유닛 및 통합 검증용 테스트 추가하여 Requirements 추적성 충족.

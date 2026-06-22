@@ -1,6 +1,6 @@
-# 이전 실행 계획 - Hotfix R-12 (R-13 우선 처리로 일시 중지)
+# 이전 실행 계획 - Hotfix R-12/13/14
 
-> 현재 활성 실행 계획은 이 문서 하단의 **Hotfix R-13 (Linux/WSL2 및 Docker Compose 표준화)**입니다.
+> 현재 활성 실행 계획은 이 문서 하단의 **Hotfix R-15 (OpenSCAD 코드 생성 제약 강화 및 SCAD 정적 검증기 추가)**입니다.
 
 ## 상세 분석 요약
 
@@ -383,15 +383,143 @@ flowchart TD
 | 요구사항 | 인수 기준 | 필수 테스트 증거 | 테스트 수준 | 예정 파일 또는 시나리오 | 필요 결과 |
 | --- | --- | --- | --- | --- | --- |
 | R-14 | 실제 장애 케이스 호환 | `run_tool` 호출 시 `["-o", "dice_design/octahedron_dice.stl", "dice_design/octahedron_dice.scad"]` 형태의 하위 입출력 경로 성공 검증 | unit/integration | `tests/test_unit_3.py` | Pass |
-| R-14 | Path Traversal 방어 | `../escape.stl` 등 상위 탈출 경로나 절대 경로 출력이 차단되는지 검증 | unit/integration | `tests/test_unit_3.py` | Pass (예외 발생) |
-| 회귀 방지 | 기존 동작 유지 | 전체 테스트 실행 | regression | `pytest -q` | 모든 테스트 통과 (56개 이상) |
-
-## 성공 기준
-- OpenSCAD 실행 전에 workspace 내에 존재하는 모든 하위 디렉토리 구조가 임시 폴더(/tmp) 하위에 동일하게 재생성된다.
-- workspace 하위의 모든 `.scad` 소스 파일들이 상대 경로를 유지하여 임시 폴더로 안전하게 복사된다.
-- CLI 인자(`args`) 중 `-o` 출력 경로를 정확히 파싱하여, 그에 해당하는 부모 디렉토리가 임시 폴더 내에 미리 생성된다.
-- 모든 파일 및 디렉토리 관련 경로는 resolve 후 workspace 내부로 엄격히 제한 및 검증된다.
-- 임시 폴더 내의 파일 단위로 크기/수정 시간 스냅샷(Snapshot)을 생성하여 관리하며, 실행 후 스냅샷과 대조해 새로 생성되었거나 변경된 파일만 선별 복사한다.
-- `-o`로 명시된 출력 파일은 덮어쓰기를 허용하지만, 그 외 기존 workspace에 있던 파일(입력 소스 등)들을 덮어쓰거나 변경하는 충돌을 철저히 방지한다.
 - 기존의 timeout, resource limit, Path Traversal 방어 로직을 완벽히 유지한다.
 - 기존 회귀 테스트 및 신규 방어 테스트를 포함한 전체 테스트가 통과한다.
+
+---
+
+# 실행 계획 - Hotfix R-15 (OpenSCAD 코드 생성 제약 강화 및 SCAD 정적 검증기 추가)
+
+## 상세 분석 요약
+
+### 변경 범위
+- **변경 유형**: LLM 시스템 프롬프트 개선 및 구문 안정성 검증기(Lightweight Static Validator) 추가
+- **주요 변경**: 시스템 프롬프트 제약 조건 주입, ScadStaticValidator 모듈 추가, LLM Plan Validation 단계 및 2중 보안 검증 단계에 scad 정적 검증 연동, LLM Plan Validation 예외 처리 및 refinement loop 피드백 복구 기능 보완.
+- **관련 파일**: `llm/client.py`, `llm/retry.py`, `llm/validator.py`, `llm/scad_validator.py` [NEW], `tests/test_unit_2.py`, `tests/test_unit_5.py`
+
+### 영향 평가
+- **사용자 화면 변경**: 없음
+- **API 계약 변경**: 없음
+- **데이터 모델 변경**: 없음
+- **구조 변경**: 정적 검증 가드레일 추가 및 refinement 피드백 범위 구체화
+- **런타임 변경**: LLM Plan validation 도중 scad 파일 생성 시 구문 검증 프로세스 추가 실행
+- **비기능 영향**: 잘못된 구문(v.x, 싱글 쿼트 등)의 scad 파일이 격리 실행(/tmp) 전에 완벽 차단 및 자동 수정 재요청 성공률 증가
+
+### 컴포넌트 관계
+- **LLM Client**: `system_prompt`를 개선하여 OpenSCAD 전용 생성 제약 사항 전달.
+- **ScadStaticValidator**: `WRITE_FILE` 시 `.scad` 파일을 대상 문서로 삼아 정규식/텍스트 검색으로 7가지 주요 금지 패턴 검출.
+- **Retry Executor**: validation 실패 시 `LLMPlanValidationError`를 잡아 refinement loop로 피드백 메시지를 탑재해 재시도 유도.
+- **SecurityPolicyValidator**: 2중 보안으로 scad 검증 실행.
+- **테스트**: 정적 검증 실패/성공 및 refinement loop 정상 동작 유무에 대한 단위/통합 테스트 제공.
+
+### 위험 평가
+- **위험 수준**: 낮음
+- **롤백 복잡도**: 쉬움 - scad_validator 제거 및 관련 파일 revert로 가능
+- **테스트 복잡도**: 보통 - 9대 유닛 테스트와 1대 오케스트레이션 refinement 통합 테스트 실행
+- **주요 위험**: 정규식 기반 검사의 false positive (예: 주석 내의 문장 오검출). 주석 stripping(//, /* */) 헬퍼를 전처리하여 이를 원천 예방함.
+
+## 워크플로 시각화
+
+```mermaid
+flowchart TD
+    Start(["R-15 구문 제약 및 정적 검증"])
+    WD["Workspace Detection<br/><b>COMPLETED</b>"]
+    RE["Reverse Engineering<br/><b>SKIP</b>"]
+    RA["Requirements Analysis<br/><b>COMPLETED</b>"]
+    US["User Stories<br/><b>SKIP</b>"]
+    WP["Workflow Planning<br/><b>IN PROGRESS</b>"]
+    AD["Application Design<br/><b>SKIP</b>"]
+    UG["Units Generation<br/><b>SKIP</b>"]
+    FD["Functional Design<br/><b>SKIP</b>"]
+    NFRA["NFR Requirements<br/><b>SKIP</b>"]
+    NFRD["NFR Design<br/><b>SKIP</b>"]
+    ID["Infrastructure Design<br/><b>SKIP</b>"]
+    CG["Code Generation<br/><b>EXECUTE</b>"]
+    BT["Build and Test<br/><b>EXECUTE</b>"]
+    OPS["Operations<br/><b>PLACEHOLDER</b>"]
+    End(["R-15 완료"])
+
+    Start --> WD --> RE --> RA --> US --> WP --> AD --> UG --> FD --> NFRA --> NFRD --> ID --> CG --> BT --> OPS --> End
+
+    style WD fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    style RA fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    style WP fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray:5 5,color:#000
+    style CG fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray:5 5,color:#000
+    style BT fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray:5 5,color:#000
+    style RE fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray:5 5,color:#000
+    style US fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray:5 5,color:#000
+    style AD fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray:5 5,color:#000
+    style UG fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray:5 5,color:#000
+    style FD fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray:5 5,color:#000
+    style NFRA fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray:5 5,color:#000
+    style NFRD fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray:5 5,color:#000
+    style ID fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray:5 5,color:#000
+    style OPS fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray:5 5,color:#000
+    style Start fill:#CE93D8,stroke:#6A1B9A,stroke-width:3px,color:#000
+    style End fill:#CE93D8,stroke:#6A1B9A,stroke-width:3px,color:#000
+    linkStyle default stroke:#333,stroke-width:2px
+```
+
+### 텍스트 대체 표현
+1. Workspace Detection 완료
+2. Reverse Engineering 생략
+3. Requirements Analysis 승인 완료
+4. User Stories, Application Design, Units Generation 및 Construction 설계 단계 생략
+5. Code Generation에서 ScadStaticValidator 작성, 프롬프트 개선 및 retry executor 연동 구현
+6. Build and Test에서 단위·통합 및 전체 회귀 테스트 실행
+7. Operations는 Placeholder로 종료
+
+## 단계 계획
+
+### INCEPTION PHASE
+- [x] Workspace Detection - 완료
+- [x] Reverse Engineering - 생략
+- [x] Requirements Analysis - 승인 완료
+- [ ] Workflow Planning - 진행 중
+- [ ] Application Design - 생략
+- [ ] Units Generation - 생략
+
+### CONSTRUCTION PHASE
+- [ ] Functional Design - 생략
+- [ ] NFR Requirements - 생략
+- [ ] NFR Design - 생략
+- [ ] Infrastructure Design - 생략
+- [ ] Code Generation - 실행 (ALWAYS)
+- [ ] Build and Test - 실행 (ALWAYS)
+
+### OPERATIONS PHASE
+- [ ] Operations - Placeholder
+
+## 변경 순서
+
+1. `llm/scad_validator.py` [NEW]: 주석 제거 기능 및 7대 규칙 검사기 작성
+2. `llm/client.py`: system_prompt에 구문/설명글/마크다운 펜스 금지 제약 추가
+3. `llm/retry.py`: `generate_actions`에서 scad validation 호출 및 `LLMPlanValidationError` catch 후 refinement loop에 feedback 반영 연동
+4. `llm/validator.py`: `SecurityPolicyValidator.validate_actions` 내부에서도 2중 방어로 scad validation 실행 보장
+5. `tests/test_unit_2.py`: ScadStaticValidator에 대한 9대 유닛 테스트 케이스 생성
+6. `tests/test_unit_5.py`: refinement 루프 정상 작동 검증 통합 테스트 생성
+7. pytest 전체 58개 테스트 회귀 및 신규 10개 테스트 동작 검증 수행
+
+## 요구사항 검증 계획
+
+| 요구사항 | 인수 기준 | 필수 테스트 증거 | 테스트 수준 | 예정 파일 또는 시나리오 | 필요 결과 |
+| --- | --- | --- | --- | --- | --- |
+| R-15 | `v.x` 속성 접근 차단 | `point.x` 매칭 시 `LLMPlanValidationError` 발생 | unit | `tests/test_unit_2.py` | Pass |
+| R-15 | 싱글 쿼트 `'` 차단 | `'` 포함 시 `LLMPlanValidationError` 발생 | unit | `tests/test_unit_2.py` | Pass |
+| R-15 | 라디안 변환 수식 차단 | `180 / PI`, `PI / 180` 등 포함 시 `LLMPlanValidationError` 발생 | unit | `tests/test_unit_2.py` | Pass |
+| R-15 | 마크다운 펜스 ``` 차단 | ``` 포함 시 `LLMPlanValidationError` 발생 | unit | `tests/test_unit_2.py` | Pass |
+| R-15 | prose 설명글 차단 | `Here is`, `다음은` 등 prose 시작 시 `LLMPlanValidationError` 발생 | unit | `tests/test_unit_2.py` | Pass |
+| R-15 | 빈 파일 차단 | content가 공백이거나 비었을 때 차단 | unit | `tests/test_unit_2.py` | Pass |
+| R-15 | 최소 OpenSCAD 구조 검증 | module 등 openSCAD 키워드가 없을 때 차단 | unit | `tests/test_unit_2.py` | Pass |
+| R-15 | 정상 SCAD 허용 | 올바른 SCAD 구문 통과 | unit | `tests/test_unit_2.py` | Pass |
+| R-15 | 주석 내 금지 패턴 허용 | `// point.x` 등 주석 처리 시 오경보 없이 통과 | unit | `tests/test_unit_2.py` | Pass |
+| R-15 | refinement 연동 성공 | 1차 실패 후 에러 피드백을 llm에 전달하여 2차에 정상 동작 보장 | integration | `tests/test_unit_5.py` | Pass |
+| 회귀 방지 | 기존 동작 유지 | 전체 테스트 실행 | regression | `pytest` | 모든 테스트 통과 (58개 이상) |
+
+## 성공 기준
+- LLM 시스템 프롬프트에 마크다운 펜스, 설명글, 벡터 속성 접근 금지 및 더블 쿼트 필수화, degree 직접 사용 규칙이 주입된다.
+- `ScadStaticValidator`가 scad 파일에 대해 7가지 검증 실패 규칙을 완벽하게 검증한다.
+- 검사 도중 주석(`//`, `/* */`)에 기술된 문장으로 인한 false positive가 발생하지 않는다.
+- 정적 검증 실패 시 `LLMPlanValidationError`가 정확하게 발생하며, refinement loop를 통해 에러 피드백이 LLM에 복구용 단서로 전달된다.
+- 기존의 모든 보안/비기능 요건이 유지되고 신규 테스트 및 기존 58개 테스트가 모두 성공한다.
+

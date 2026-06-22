@@ -84,6 +84,12 @@ class SecurityPolicyValidator:
                             self._log_and_raise_violation(db, job_id, err_msg)
                         current = current.parent
 
+                # 2.5 Scad 파일 내용에 대한 정적 검증 (WRITE_FILE 액션 및 .scad 확장자 대상)
+                if action_type == "WRITE_FILE" and path_str.lower().endswith(".scad"):
+                    from llm.scad_validator import ScadStaticValidator
+                    ScadStaticValidator.validate(action_obj.content)
+
+
     def _log_and_raise_violation(self, db: Session, job_id: uuid.UUID, message: str) -> None:
         """
         보안 위반 내용을 DB event_logs 테이블에 동기적으로 INSERT하고 403 예외를 던집니다.

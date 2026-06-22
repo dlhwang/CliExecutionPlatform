@@ -102,13 +102,13 @@ class JobOrchestratorService:
                     f"LLM plan request attempt {attempt}.",
                 ),
             )
-            actions = await retry_executor.generate_actions(request)
-
             db = self._session_factory()
             try:
-                self._validator.validate_actions(actions, job_id, db)
+                validation_cb = lambda acts: self._validator.validate_actions(acts, job_id, db)
+                actions = await retry_executor.generate_actions(request, validation_cb=validation_cb)
             finally:
                 db.close()
+
 
             self._repository.save_action_plan(job_id, actions)
             self._repository.append_event(

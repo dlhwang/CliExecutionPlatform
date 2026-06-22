@@ -1623,3 +1623,166 @@ R-14는 다음 기준으로 구현하는 것이 안전합니다.
 **Context**: Recommending commit message for R-14 hotfix containing isolated subdirectory output copy fixes and PostgreSQL DB container integration in Docker Compose.
 
 ---
+
+## Git Commit Files Ignore Inspection - Hotfix Cycle (R-14)
+**Timestamp**: 2026-06-22T14:02:00+09:00
+**User Input**: "git revision number 인데 `3a5f68235c16ee06cb3b713225a139e95fd2d27e` 여기에 커밋된것중에 git ignore해야하는 것만 확인해줘"
+**AI Response**: "검사 결과, 해당 커밋에는 `.env`, `.workspaces`, `venv/`, `__pycache__/` 등 `.gitignore` 대상 파일이나 비밀 키가 포함되어 있지 않고, 정상적인 구성 파일과 코드만 안전하게 포함되어 있음을 확인했습니다."
+**Context**: Inspecting git revision 3a5f68235c16ee06cb3b713225a139e95fd2d27e for any incorrectly committed ignore-target files.
+
+---
+
+## Build and Test Stage Approval - Hotfix Cycle (R-14)
+**Timestamp**: 2026-06-22T14:02:20+09:00
+**User Input**: "승인"
+**AI Response**: "R-14 Build and Test 승인을 기록하고 Operations Placeholder 단계를 거쳐 최종 완료 처리했습니다."
+**Status**: Approved
+**Context**: Build and Test approved. Transitioning to Operations Phase and completing R-14 lifecycle.
+
+---
+
+## Workspace Detection - New Hotfix Cycle (R-15)
+**Timestamp**: 2026-06-22T14:13:53+09:00
+**User Input**: "LLM한테 OpenSCAD 코드를 만들라고 할 때 반드시 이런 제약을 넣어.
+.workspaces\jobs\019eedb2-4f2c-7ad4-baec-2cb274b8e25a\octahedron_dice\dice.scad
+이게 원인파일인데 stl으로 openscad로 파싱하니 에러가 발생했어
+
+
+```
+Generate pure OpenSCAD code only.
+
+Rules:
+- Do not use Markdown code fences.
+- Do not include explanations, comments outside valid OpenSCAD syntax, or prose.
+- OpenSCAD vectors must be accessed with index syntax, e.g. v[0], v[1], v[2]. Never use v.x, v.y, or v.z.
+- Use double quotes for strings, e.g. "center". Do not use single quotes.
+- OpenSCAD trigonometric functions use degrees. Do not multiply atan2/cos/sin values by 180 / PI.
+- The output must be directly executable by OpenSCAD CLI.
+```
+
+추가적으로 scad 생성되었을때 scad를 검증하는 절차를 추가해야겠어"
+**AI Response**: "새로운 핫픽스(R-15: OpenSCAD 코드 생성 제약 강화 및 SCAD 구문 검증 절차 구현)를 착수하기 위해 Workspace Detection 및 Requirements Analysis 단계를 시작합니다."
+**Context**: Initiating workspace detection for a new hotfix cycle R-15.
+
+---
+
+## Requirements Analysis Questionnaire Response - Hotfix Cycle (R-15)
+**Timestamp**: 2026-06-22T14:18:45+09:00
+**User Input**: "답변완료
+(질문지 답변 내용):
+- Q1. SCAD 파일의 정적 검증 수행 시점: A (LLM Action Plan 파싱 및 검증 단계 - llm/validator.py 등)
+- Q2. SCAD 구문 정적 검증 규칙의 구체적 대상: A, C
+  - 벡터 속성(.x, .y, .z) 차단 -> v[0], v[1], v[2] 유도
+  - 싱글 쿼트(') 차단 -> 더블 쿼트만 허용
+  - 180 / PI 또는 PI / 180 등 삼각함수 수식 차단
+  - [추가] Markdown code fence 차단 (scad, openscad, ``` 등)
+  - [추가] 설명문/prose 시작 차단 (Here is, The following, 아래는, 다음은 등)
+  - [추가] 빈 SCAD 파일 차단
+  - [추가] 최소 OpenSCAD 구조 검증 (module, polyhedron, cube, sphere, difference, union 등 구성 요소 전무할 때 차단)
+- Q3. 정적 검증 실패 시 예외 처리: A (LLMPlanValidationError 발생 및 Refinement Loop 유도)
+- Q4. Security Baseline 확장 옵션 적용 여부: A (No)
+- Q5. Property-Based Testing 확장 옵션 적용 여부: A (No)
+"
+**AI Response**: "사용자 답변을 확인하여 요구사항을 구체화했습니다. R-15 요구사항을 `requirements.md`에 기술하고, `aidlc-state.md` 단계를 갱신하여 승인 요청을 준비합니다."
+**Context**: Completed requirements questionnaire for R-15. Processing answers to generate requirements.md.
+
+---
+
+## Requirements Analysis Completion and Approval Request - Hotfix Cycle (R-15)
+**Timestamp**: 2026-06-22T14:19:30+09:00
+**AI Prompt**: "Requirements Analysis Complete. Ready to proceed to Workflow Planning?"
+**Status**: Approval Pending
+**Context**: Requirements Analysis completed for R-15 hotfix. Requested user approval to transition to Workflow Planning.
+
+---
+
+## Workflow Planning Completion and Approval Request - Hotfix Cycle (R-15)
+**Timestamp**: 2026-06-22T14:23:00+09:00
+**AI Prompt**: "Workflow Planning Complete. Ready to proceed with this plan?"
+**Status**: Approval Pending
+**Context**: Workflow Planning completed for R-15 hotfix. Requested user approval to transition to Code Generation stage.
+
+---
+
+## Code Generation Part 1 (Planning) Completion and Approval Request - Hotfix Cycle (R-15)
+**Timestamp**: 2026-06-22T14:24:00+09:00
+**AI Prompt**: "Code Generation Plan Complete. Ready to proceed to Part 2 (Generation)?"
+**Status**: Approval Pending
+**Context**: Code Generation Part 1 completed for R-15 hotfix. Created detailed plan checklist. Requested user approval to start code modification.
+
+---
+
+## Code Generation Part 1 (Planning) Revised Completion and Approval Request - Hotfix Cycle (R-15)
+**Timestamp**: 2026-06-22T14:25:20+09:00
+**AI Prompt**: "Code Generation Plan Complete. Ready to proceed to Part 2 (Generation)?"
+**Status**: Approval Pending
+**Context**: Code Generation Part 1 revised plan created incorporating user feedback on validation single-source, comments parser, and prompt targets. Requested user approval to start code modification.
+
+---
+
+## Code Generation Part 1 (Planning) Approved - Hotfix Cycle (R-15)
+**Timestamp**: 2026-06-22T14:25:47+09:00
+**User Input**: "approve"
+**AI Response**: "R-15 Code Generation 계획을 공식 승인받고 Part 2 (Generation) 구현 단계로 진입합니다."
+**Status**: Approved
+**Context**: Code Generation Part 1 approved. Transitioning to Code Generation Part 2 (Generation).
+
+---
+
+## Code Generation Part 2 & Build and Test Completed - Hotfix Cycle (R-15)
+**Timestamp**: 2026-06-22T14:29:10+09:00
+**User Input**: "approve"
+**AI Response**: "R-15 Code Generation 계획 승인을 기록하고 Part 2 구현 및 검증을 완료했습니다. llm/scad_validator.py 정적 검증기를 구현하고 llm/client.py 시스템 프롬프트를 보강하였으며, llm/retry.py, llm/validator.py, orchestrator/service.py에서 중복 검증 호출을 단일화하고 refinement loop에 연동했습니다. tests/test_unit_2.py 및 tests/test_unit_5.py에 유닛/통합 테스트를 추가하여 총 69개 테스트 전원 통과를 확인했습니다."
+**Status**: Completed
+**Context**: R-15 Code Generation & Build and Test completed. Ready for operations stage.
+
+
+---
+
+## Operations Stage Approved & Lifecycle Completed - Hotfix Cycle (R-15)
+**Timestamp**: 2026-06-22T14:31:00+09:00
+**User Input**: "continue"
+**AI Response**: "R-15 Operations(Placeholder) 단계 진입 및 최종 라이프사이클 종료를 승인받았습니다. 핫픽스 R-15에 대한 전체 AI-DLC 프로세스가 완결되었으며 최신 수정 사항들이 master 브랜치에 안전하게 병합될 준비가 되었습니다."
+**Status**: Approved & Completed
+**Context**: R-15 Hotfix Lifecycle completed.
+
+---
+
+## Refinement Feedback Size Constraint Request - Hotfix Cycle (R-15)
+**Timestamp**: 2026-06-22T14:31:11+09:00
+**User Input**: "구현은 전반적으로 괜찮은데, refinement feedback 토큰 폭발 방지 장치를 추가해줘.
+
+다음 사항을 반영해줘.
+
+1. `LLMPlanValidationError`에 들어가는 SCAD validation message는 bounded feedback이어야 한다.
+   - 원본 `.scad` 전체 content를 포함하지 않는다.
+   - 전체 action plan JSON을 포함하지 않는다.
+   - traceback 전체를 포함하지 않는다.
+   - rule id, 짧은 설명, 대표 snippet만 포함한다.
+
+2. 각 validation rule별 snippet은 최대 1~2개만 포함한다.
+   - snippet 길이는 최대 120~200자 사이로 제한한다.
+   - 초과 시 `...`로 truncate한다.
+
+3. 전체 SCAD validation feedback message 길이를 제한한다.
+   - 예: 최대 1,500자.
+   - 초과 시 나머지는 생략하고 “additional violations omitted” 같은 요약 문구를 넣는다.
+
+4. retry/refinement 요청에 이전 validation feedback을 계속 누적하지 않도록 확인한다.
+   - 현재 시도에서 발생한 validation failure summary만 다음 LLM 요청에 전달한다.
+   - 과거 실패 메시지를 매 retry마다 계속 이어붙이지 않는다.
+
+5. 테스트를 추가하거나 기존 테스트를 보완해줘.
+   - 긴 invalid SCAD content가 들어와도 refinement feedback에 전체 SCAD 본문이 포함되지 않는지 검증.
+   - feedback 길이가 제한되는지 검증.
+   - 대표 rule id는 유지되는지 검증.
+
+추천 테스트명:
+- `test_scad_validation_feedback_does_not_include_full_content`
+- `test_scad_validation_feedback_is_bounded`
+"
+**AI Response**: "피드백 토큰 폭발 방지 요구사항을 접수했습니다. 정적 검증기의 에러 메시지 구성 방식 보완 및 refinement 요청 시 피드백 누적 방지 방안을 담은 추가 계획을 수립하고 기획 승인 대기 단계로 복귀합니다."
+**Status**: Planning Mode Initiated
+**Context**: Received new requirement for bounding refinement feedback.
+
+

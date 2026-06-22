@@ -84,7 +84,14 @@ class HttpLLMClient:
                 "RULES:\n"
                 "- All file paths MUST be relative (no leading / or ../)\n"
                 "- Do NOT invent new field names — use only the fields shown above\n"
-                "- The JSON array must be the only output inside the ```json ``` block"
+                "- The JSON array must be the only output inside the ```json ``` block\n"
+                "- For WRITE_FILE actions targeting .scad files, the \"content\" string MUST follow these strict OpenSCAD rules:\n"
+                "  * Do NOT use Markdown code fences (e.g. ``` or ```scad) inside the scad content itself.\n"
+                "  * Do NOT include prose, conversational prefixes or explanations (e.g. \"Here is\", \"The following\", \"Below is\", \"아래는\", \"다음은\", \"다음 코드는\") inside the scad content.\n"
+                "  * Do NOT use vector property access (.x, .y, .z). Access vector indices with bracket syntax ONLY (e.g. v[0], v[1], v[2]).\n"
+                "  * Do NOT use single quotes (') for strings; always use double quotes (\").\n"
+                "  * OpenSCAD trigonometric functions use degrees directly; do NOT use radian conversion formulas (180 / PI or PI / 180).\n"
+                "  * The content must be non-empty and must contain valid OpenSCAD constructs (e.g. module, polyhedron, cube, sphere, translate)."
             )
 
             payload = {

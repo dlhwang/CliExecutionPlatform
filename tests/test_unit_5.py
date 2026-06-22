@@ -322,7 +322,8 @@ def test_orchestration_failed_log_includes_exception_detail(caplog, db_session, 
 
     # LLM이 tool_name 대신 tool 필드를 반환하도록 잘못된 응답 주입
     bad_response = '[{"action": "RUN_TOOL", "tool": "openscad", "inputs": {}}]'
-    llm_client = FakeLLMClient([bad_response])
+    llm_client = FakeLLMClient([bad_response, bad_response, bad_response])
+
 
     service = JobOrchestratorService(
         OrchestratorRepository(TestingSessionLocal),
@@ -413,3 +414,42 @@ def test_orchestration_transition_failure_is_logged(caplog, db_session, test_sto
     assert any("Failed to persist orchestration failure" in message for message in messages)
     assert all("sensitive prompt" not in message for message in messages)
     assert sum(record.exc_info is not None for record in caplog.records) >= 2
+
+
+def test_orchestrator_refines_when_scad_static_validation_fails(db_session, test_storage):
+    import json
+    # R-15: SCAD 검증 에러 발생 시 refinement loop 재시도 동작 검증
+    job = JobService(db_session, test_storage).create_job("create scad cube")
+
+    bad_scad_content = "cube([10, 20, 30]);\nvector = [1, 2, 3];\necho(vector.x);"
+    bad_plan = f'[{{"action":"WRITE_FILE","path":"model.scad","content":{json.dumps(bad_scad_content)}}}]'
+
+    good_scad_content = "cube([10, 20, 30]);"
+    good_plan = f'[{{"action":"WRITE_FILE","path":"model.scad","content":{json.dumps(good_scad_content)}}}]'
+
+    llm_client = FakeLLMClient([bad_plan, good_plan])
+
+    repository = OrchestratorRepository(TestingSessionLocal)
+    service = JobOrchestratorService(
+        repository,
+        TestingSessionLocal,
+        test_storage,
+        llm_client,
+        ActionPlanParser(),
+        SecurityPolicyValidator(test_storage.base_dir),
+        ActionExecutor(test_storage, FakeRunner(), TestingSessionLocal),
+        OrchestrationConcurrencyGate(),
+    )
+
+    success = asyncio.run(service.run(job.id))
+    assert success is True
+
+    assert len(llm_client.requests) == 2
+    assert llm_client.requests[1].retry_feedback is not None
+    assert "[SCAD_VECTOR_PROPERTY_ACCESS]" in llm_client.requests[1].retry_feedback
+
+    db_session.expire_all()
+    completed_job = db_session.get(Job, job.id)
+    assert completed_job.status == "COMPLETED"
+    assert test_storage.read_file(job.id, "model.scad").decode("utf-8") == good_scad_content
+
