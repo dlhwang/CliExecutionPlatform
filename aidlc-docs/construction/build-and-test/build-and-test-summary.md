@@ -145,4 +145,36 @@ docker compose ps
 - **로컬 코드 통합 준비**: Yes
 - **운영 배포 준비**: Conditional - Docker 환경에서 build 및 STL/PNG smoke 통과 필요
 
+---
+
+# R-15 Build and Test Summary (Refinement Feedback 보완 추가 포함)
+
+## 실행 정보
+
+- **실행 시각**: 2026-06-22T14:44:00+09:00
+- **Python build**: Pass (`py_compile`)
+- **전체 테스트**: 71 passed, 0 failed
+- **Docker build/smoke**: N/A - 컨테이너 로컬 실행 환경(Docker CLI)이 없음
+
+## R-15 요구사항 검증
+
+| 요구사항 | 자동화 증거 | 명령 | 결과 |
+| --- | --- | --- | --- |
+| 마크다운 펜스 및 prose 검사 | `test_scad_static_validation_rejects_markdown_fence`<br>`test_scad_validation_feedback_does_not_include_full_content` | 전체 pytest | Pass |
+| 벡터 property access 차단 | `test_scad_static_validation_rejects_vector_property_access` | 전체 pytest | Pass |
+| 싱글 쿼트 문자 사용 차단 | `test_scad_static_validation_rejects_single_quotes` | 전체 pytest | Pass |
+| Radian conversion 사용 차단 | `test_scad_static_validation_rejects_180_div_pi`<br>`test_scad_static_validation_rejects_pi_div_180` | 전체 pytest | Pass |
+| 빈 파일 및 키워드 누락 차단 | `test_scad_static_validation_rejects_empty_file`<br>`test_scad_static_validation_rejects_missing_scad_keyword` | 전체 pytest | Pass |
+| [보완] 피드백 크기 제한 (1,500자) | `test_scad_validation_feedback_is_bounded` (길이 및 요약 문구 검증) | 전체 pytest | Pass |
+| [보완] snippet 길이 제한 (150자) | `test_scad_validation_feedback_is_bounded` (truncate '...' 검증) | 전체 pytest | Pass |
+| [보완] 원본 전체 포함 차단 | `test_scad_validation_feedback_does_not_include_full_content` | 전체 pytest | Pass |
+| [보완] shutil.copyfile() 교체 | `tests/test_unit_2.py`, `tests/test_unit_3.py` (간접 통과) | 전체 pytest | Pass |
+| 기존 API/SSE 및 Refinement 회귀 | 전체 71 tests | `python -m pytest` | Pass |
+
+## 전체 상태
+
+- **코드 회귀 및 정적 요구사항 검증**: Complete (71/71 tests passed)
+- **실제 container acceptance 검증**: Incomplete (Docker 미설치 환경)
+- **운영 배포 준비**: Conditional - Docker 환경에서 build 및 STL/PNG smoke 통과 필요
+
 

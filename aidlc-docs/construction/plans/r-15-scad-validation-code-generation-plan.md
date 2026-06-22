@@ -69,6 +69,23 @@
     - `.\venv\Scripts\python -m pytest tests/ -v`
   - 확인 사항: 기존 전체 테스트 및 신규 테스트 모두 안전하게 통과하는지 회귀 검증.
 
+- [x] **Step 8: Refinement 피드백 토큰 폭발 방지 기능 구현**
+  - 파일 경로: [llm/scad_validator.py](file:///d:/workspace/CLI-Execution-Platform/llm/scad_validator.py) [MODIFY]
+  - 구현 내용:
+    - `strip_comments`: multiline block comment 내부의 newline 보존하도록 하여 라인 넘버 맵핑이 원본과 정확히 1:1 유지되도록 개선.
+    - `ScadStaticValidator.validate`: 7대 규칙에 대해 위반 라인 리스트를 구하고, 위반당 최대 1~2개 snippet(최대 150자 제한, 초과 시 `...` truncate) 추출.
+    - 전체 에러 피드백 문자열의 길이를 조립할 때 최대 1,500자를 넘지 않도록 제한 및 추가 위반 생략 문구(`... [additional violations omitted]`) 추가.
+
+- [x] **Step 9: 신규 토큰 폭발 방지 테스트 케이스 추가 및 검증**
+  - 파일 경로: [tests/test_unit_2.py](file:///d:/workspace/CLI-Execution-Platform/tests/test_unit_2.py) [MODIFY]
+  - 구현 내용:
+    - `test_scad_validation_feedback_does_not_include_full_content` 구현: 100줄이 넘는 SCAD 내용 입력 시, 원본 전체가 아닌 위반 라인 snippet만 피드백에 도출되는지 검증.
+    - `test_scad_validation_feedback_is_bounded` 구현: 다수의 에러를 내포한 대량의 SCAD 입력 시, 총 피드백 길이가 1,500자 이하로 제한되고 Rule ID와 생략 메시지가 유지되는지 검증.
+
+- [x] **Step 10: 전체 테스트 수행 및 회귀 검증**
+  - 실행 명령: 
+    - `.\venv\Scripts\python -m pytest tests/ -v`
+  - 확인 사항: 모든 신규/기존 테스트가 성공적으로 동작하는지 검증.
 
 ---
 
@@ -77,3 +94,5 @@
 - **Requirement R-15**:
   - `llm/scad_validator.py`, `llm/client.py`, `llm/retry.py`, `llm/validator.py`, `orchestrator/service.py` 코드 보완을 통해 단일화된 검증기 구축 및 refinement loop 연동.
   - `tests/test_unit_2.py`, `tests/test_unit_5.py`에 유닛 및 통합 검증용 테스트 추가하여 Requirements 추적성 충족.
+  - [보완] 토큰 폭발 방지를 위해 검증 피드백 길이 제한(1,500자) 및 위반 라인 snippet화(최대 2개, 150자 제한), 이전 피드백 누적 방지 기법 적용.
+  - [보완] `shutil.copy2(...)` 사용을 제거하고 산출물 복사는 `shutil.copyfile(...)`로 전격 교체 (`storage/local.py`, `runner/service.py`).

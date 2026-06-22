@@ -311,3 +311,89 @@ def test_scad_static_validation_ignores_comment_only_forbidden_patterns():
     # 주석이 제거된 뒤에는 cube 키워드만 남고 금지 구문은 없어야 하므로 예외가 발생하지 않아야 함
     ScadStaticValidator.validate(content)
 
+
+def test_scad_validation_feedback_does_not_include_full_content():
+    from llm.scad_validator import ScadStaticValidator
+
+    # 100줄이 넘고, 중간 52라인에만 위반이 심어진 긴 scad content 구성
+    lines = []
+    for i in range(1, 120):
+        if i == 52:
+            lines.append("vector = [1, 2, 3]; val = vector.x; // Forbidden rule 3")
+        elif i == 80:
+            lines.append("cube([5, 5, 5]); // Normal cube but normal code")
+        else:
+            lines.append(f"// Line {i} dummy content to inflate size translate([0, 0, 0])")
+    
+    # scad 키워드가 최소 1개 필요하므로 맨 끝에 module 추가
+    lines.append("module dummy() { cube([1,1,1]); }")
+    content = "\n".join(lines)
+
+    with pytest.raises(LLMPlanValidationError) as exc_info:
+        ScadStaticValidator.validate(content)
+        
+    msg = exc_info.value.message
+    # 1. 전체 원본 content가 포함되어선 안 된다.
+    # 즉, 100줄의 더미 주석 라인들이 피드백에 노출되지 않아야 한다.
+    assert "dummy content to inflate size" not in msg
+    # 2. 위반이 발생한 52라인의 snippet은 포함되어야 한다.
+    assert "[SCAD_VECTOR_PROPERTY_ACCESS]" in msg
+    assert "Line 52: vector = [1, 2, 3]; val = vector.x;" in msg
+    # 3. 80라인의 정상 코드 라인 역시 피드백에 포함되지 않아야 한다.
+    assert "Normal cube but normal code" not in msg
+
+
+def test_scad_validation_feedback_is_bounded():
+    from llm.scad_validator import ScadStaticValidator
+
+    # 다수의 위반 사항을 중복으로 대량 심은 scad 코드 생성
+    lines = []
+    # 1. Markdown fence (Rule 2)
+    # Markdown fence 라인도 150자가 넘게 구성
+    lines.append("```scad " + ("f" * 150))
+    
+    # 2. Vector property access (Rule 3)
+    for i in range(10):
+        # snippet 길이 150자 제한 검증을 위해 150자가 넘는 아주 긴 위반 라인 삽입
+        long_line = f"v.x = {i}; " + ("a" * 150) + " // very long padding line"
+        lines.append(long_line)
+        
+    # 3. Single quotes (Rule 4)
+    for i in range(10):
+        # snippet 150자 초과를 위해 긴 라인 구성
+        lines.append(f"s{i} = 'single quote string' " + ("b" * 150) + ";")
+        
+    # 4. Radian conversions (Rule 5)
+    for i in range(10):
+        lines.append(f"ang{i} = 180 / PI; " + ("c" * 150) + " // radian conversion")
+        
+    # 5. Prose explanations (Rule 6)
+    for i in range(10):
+        lines.append(f"// Here is some explanation {i}")
+        lines.append(f"Here is some forbidden conversational prefix {i} " + ("d" * 150))
+
+    lines.append("```")
+    # 키워드 추가
+    lines.append("module trigger() { cube([1,1,1]); }")
+
+    content = "\n".join(lines)
+
+    with pytest.raises(LLMPlanValidationError) as exc_info:
+        ScadStaticValidator.validate(content)
+
+    msg = exc_info.value.message
+    
+    # 1. 전체 메시지 길이는 1,500자를 넘을 수 없다.
+    assert len(msg) <= 1500
+    
+    # 2. 생략되었다는 요약 문구가 포함되어야 한다.
+    assert "[additional violations omitted]" in msg
+    
+    # 3. 대표 Rule ID는 여전히 일부 살아남아 에러 피드백의 정체성을 알리고 있어야 한다.
+    assert "[SCAD_MARKDOWN_FENCE]" in msg
+    assert "[SCAD_VECTOR_PROPERTY_ACCESS]" in msg
+    
+    # 4. snippet 150자 초과 시 truncate 되어 '...'이 붙어 있어야 한다.
+    assert "..." in msg
+
+

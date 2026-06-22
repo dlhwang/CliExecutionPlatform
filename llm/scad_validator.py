@@ -45,6 +45,8 @@ def strip_comments(content: str) -> str:
             if char == "*" and i + 1 < n and content[i + 1] == "/":
                 state = "normal"
                 i += 1  # '/' skip
+            elif char == "\n":
+                result.append(char)  # block comment 내부의 개행도 보존하여 라인 매핑 유지
         i += 1
     return "".join(result)
 
@@ -52,8 +54,6 @@ def strip_comments(content: str) -> str:
 class ScadStaticValidator:
     @staticmethod
     def validate(content: str) -> None:
-        violations = []
-
         # Rule 1: Empty SCAD content (checks raw content)
         if not content or not content.strip():
             raise LLMPlanValidationError(
@@ -62,39 +62,69 @@ class ScadStaticValidator:
                 error_code="VALIDATION_ERROR",
             )
 
+        orig_lines = content.splitlines()
+        stripped = strip_comments(content)
+        stripped_lines = stripped.splitlines()
+
+        # 라인 수 차이가 생기지 않도록 방어적 패딩 처리
+        num_lines = max(len(orig_lines), len(stripped_lines))
+        while len(orig_lines) < num_lines:
+            orig_lines.append("")
+        while len(stripped_lines) < num_lines:
+            stripped_lines.append("")
+
+        violations = []
+
+        def get_snippets(violation_indices: list[int]) -> list[str]:
+            snippets = []
+            for idx in violation_indices[:2]:  # 각 규칙별 대표 snippet은 최대 1~2개
+                line_content = orig_lines[idx]
+                if len(line_content) > 150:  # snippet 길이는 최대 150자 제한
+                    line_content = line_content[:150] + "..."
+                snippets.append(f"  * Line {idx + 1}: {line_content}")
+            return snippets
+
         # Rule 2: Markdown code fences (checks raw content)
-        if "```" in content:
-            violations.append(
+        r2_indices = [idx for idx, line in enumerate(orig_lines) if "```" in line]
+        if r2_indices:
+            r2_desc = (
                 "- [SCAD_MARKDOWN_FENCE] Markdown code fences are forbidden.\n"
                 "  Return raw OpenSCAD code only inside .scad file content."
             )
-
-        # Comment stripping for other rules
-        stripped = strip_comments(content)
+            snippets = get_snippets(r2_indices)
+            violations.append((r2_desc, snippets))
 
         # Rule 3: Vector property access
-        # Regex: r"\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*[xyz]\b"
-        if re.search(r"\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*[xyz]\b", stripped):
-            violations.append(
+        r3_pattern = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*[xyz]\b")
+        r3_indices = [idx for idx, line in enumerate(stripped_lines) if r3_pattern.search(line)]
+        if r3_indices:
+            r3_desc = (
                 "- [SCAD_VECTOR_PROPERTY_ACCESS] Forbidden vector property access found.\n"
                 "  Use index access instead: point[0], point[1], point[2]. Never use .x, .y, or .z."
             )
+            snippets = get_snippets(r3_indices)
+            violations.append((r3_desc, snippets))
 
         # Rule 4: Single quotes
-        if "'" in stripped:
-            violations.append(
+        r4_indices = [idx for idx, line in enumerate(stripped_lines) if "'" in line]
+        if r4_indices:
+            r4_desc = (
                 "- [SCAD_SINGLE_QUOTE] Single quotes are forbidden.\n"
                 "  Use double quotes for strings."
             )
+            snippets = get_snippets(r4_indices)
+            violations.append((r4_desc, snippets))
 
         # Rule 5: Radian conversion formulas
-        if re.search(r"\b180\s*/\s*PI\b", stripped, re.IGNORECASE) or re.search(
-            r"\bPI\s*/\s*180\b", stripped, re.IGNORECASE
-        ):
-            violations.append(
+        r5_pattern = re.compile(r"\b180\s*/\s*PI\b|\bPI\s*/\s*180\b", re.IGNORECASE)
+        r5_indices = [idx for idx, line in enumerate(stripped_lines) if r5_pattern.search(line)]
+        if r5_indices:
+            r5_desc = (
                 "- [SCAD_RADIAN_CONVERSION] Radian conversion formulas (180/PI or PI/180) are forbidden.\n"
                 "  OpenSCAD trigonometric functions use degrees directly."
             )
+            snippets = get_snippets(r5_indices)
+            violations.append((r5_desc, snippets))
 
         # Rule 6: Prose text inside SCAD content
         prose_patterns = [
@@ -105,15 +135,12 @@ class ScadStaticValidator:
             r"다음은",
             r"다음\s+코드는",
         ]
-        found_prose = False
-        for pattern in prose_patterns:
-            if re.search(pattern, stripped, re.IGNORECASE):
-                found_prose = True
-                break
-        if found_prose:
-            violations.append(
-                "- [SCAD_PROSE] Prose explanations or conversational prefixes are forbidden inside .scad content."
-            )
+        r6_pattern = re.compile("|".join(prose_patterns), re.IGNORECASE)
+        r6_indices = [idx for idx, line in enumerate(stripped_lines) if r6_pattern.search(line)]
+        if r6_indices:
+            r6_desc = "- [SCAD_PROSE] Prose explanations or conversational prefixes are forbidden inside .scad content."
+            snippets = get_snippets(r6_indices)
+            violations.append((r6_desc, snippets))
 
         # Rule 7: Missing OpenSCAD structure
         keywords = [
@@ -141,17 +168,42 @@ class ScadStaticValidator:
                 has_keyword = True
                 break
         if not has_keyword:
-            violations.append(
+            r7_desc = (
                 "- [SCAD_MISSING_KEYWORD] OpenSCAD structure is missing.\n"
                 "  The file must contain valid OpenSCAD keywords (e.g., module, polyhedron, cube, sphere, translate)."
             )
+            violations.append((r7_desc, []))
 
         if violations:
-            detailed_msg = "OpenSCAD static validation failed:\n" + "\n".join(
-                violations
-            )
+            header = "OpenSCAD static validation failed:\n"
+            current_len = len(header)
+            final_lines = []
+            omitted = False
+
+            for desc, snippets in violations:
+                violation_block_lines = [desc]
+                if snippets:
+                    violation_block_lines.append("  Snippet:")
+                    violation_block_lines.extend(snippets)
+                block_str = "\n".join(violation_block_lines) + "\n"
+
+                # 1,500자 크기 제한 준수를 위한 방어적 한계 검사 (1,450자 임계점 설정)
+                if current_len + len(block_str) > 1450:
+                    omitted = True
+                    break
+
+                final_lines.append(block_str)
+                current_len += len(block_str)
+
+            if omitted:
+                final_lines.append("... [additional violations omitted]")
+
+            detailed_msg = header + "".join(final_lines)
+            detailed_msg = detailed_msg.strip()
+
             raise LLMPlanValidationError(
                 message=detailed_msg,
                 status_code=400,
                 error_code="VALIDATION_ERROR",
             )
+

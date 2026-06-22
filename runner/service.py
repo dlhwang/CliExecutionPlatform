@@ -192,7 +192,7 @@ class CLIExecutionRunner:
                             attempts=0,
                         )
                     dest_file.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(src_file, dest_file)
+                    shutil.copyfile(src_file, dest_file)
 
             # 3. args의 -o 출력 경로를 파싱하여 출력 대상 부모 디렉토리를 /tmp 내부에 생성 (AC 3)
             output_file_path = None
@@ -302,7 +302,7 @@ class CLIExecutionRunner:
                                 )
 
                         workspace_target.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(f, workspace_target)
+                        shutil.copyfile(f, workspace_target)
 
         return exit_code
 

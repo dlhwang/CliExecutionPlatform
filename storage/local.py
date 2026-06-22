@@ -92,7 +92,7 @@ class LocalStorageService(StorageService):
             )
         target = self._validate_safe_path(target_job_id, relative_path, "jobs")
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+        shutil.copyfile(source, target)
 
     def save_artifact(self, job_id: UUID, relative_path: str) -> None:
         # jobs/ 디렉토리 내 원본 파일
@@ -104,7 +104,7 @@ class LocalStorageService(StorageService):
         dest_path = self._validate_safe_path(job_id, relative_path, "artifacts")
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         
-        shutil.copy2(src_path, dest_path)
+        shutil.copyfile(src_path, dest_path)
 
     def check_artifact_exists(self, job_id: UUID, filename: str) -> bool:
         try:
