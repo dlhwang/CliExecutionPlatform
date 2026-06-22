@@ -106,3 +106,55 @@ CLI-Execution-Platform/
 
 - **원인**: OpenSCAD가 미설치되었거나 PATH에 없음
 - **해결**: OpenSCAD 설치 후 `.env`에 절대 경로 설정 (테스트 실행 시에는 불필요)
+
+---
+
+## R-13 활성 빌드 기준: Linux/WSL2 및 Docker Compose
+
+이 섹션이 R-13 이후의 현재 빌드 기준이다. 네이티브 Windows Python 실행은 지원하지 않는다.
+
+### 사전 요구사항
+
+- WSL2 Linux 배포판 또는 Linux host
+- Docker Engine 및 Docker Compose V2
+- 기존 외부 PostgreSQL과 컨테이너에서 도달 가능한 hostname
+- `.env.sample`을 복사한 ASCII-only `.env`
+
+### Compose 빌드
+
+```bash
+cp .env.sample .env
+# Edit .env with the existing external DB and LLM credentials.
+docker compose config
+docker compose build
+```
+
+성공 기준:
+
+- Compose service 목록은 `app`과 `db` 두 개다.
+- 이미지에 Python 3.13, OpenSCAD, Xvfb와 xauth가 설치된다.
+- 실제 `.env`는 이미지 layer에 포함되지 않는다.
+
+### 실행 및 상태 확인
+
+```bash
+docker compose up -d
+docker compose ps
+docker compose logs -f app
+```
+
+`app`과 `db` 서비스가 모두 healthy 상태여야 하며 `http://localhost:${APP_PORT:-8000}/`가 응답해야 한다.
+
+### 데이터베이스 연결 주의사항
+
+- Compose 설정에 의해 `app` 서비스는 `db` 서비스의 헬스체크 통과 이후 구동됩니다.
+- `DATABASE_URL` 환경 변수는 `app` 컨테이너 기동 시 `postgresql://[USER]:[PASSWORD]@db:5432/[DB]` 형태로 자동 주입되며, 로컬/원격 설정은 `.env` 파일의 PostgreSQL 변수들을 통해 커스텀할 수 있습니다.
+
+### 안전한 종료
+
+```bash
+docker compose down
+```
+
+`docker compose down -v`는 `postgres_data`와 `workspace_data`의 데이터(Job 및 artifact 등)를 모두 영구 삭제하므로 신중히 사용해야 합니다.
+

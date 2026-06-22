@@ -30,10 +30,11 @@
 
 ## 🛠 기술 스택
 
-- **Framework**: FastAPI (Python 3.10+)
+- **Framework**: FastAPI (Python 3.13)
 - **Database**: PostgreSQL (Production) / SQLite (Test in-memory)
 - **ORM / Migrations**: SQLAlchemy
-- **CLI Runtime**: OpenSCAD CLI
+- **CLI Runtime**: Linux OpenSCAD CLI + Xvfb
+- **Deployment**: Docker Compose V2 (single application service)
 - **Testing**: pytest, slowapi (Rate Limiter), httpx
 
 ---
@@ -47,6 +48,11 @@ CLI-Execution-Platform/
 ├── limiter.py            # API Rate Limiter 설정 (slowapi)
 ├── requirements.txt      # 프로젝트 의존 라이브러리 목록
 ├── .env.sample           # 개발 환경 변수 설정 템플릿
+├── Dockerfile            # Python/OpenSCAD Linux 애플리케이션 이미지
+├── docker-compose.yml    # 앱 단일 서비스, 외부 DB 연결, workspace volume
+├── .dockerignore         # 비밀정보 및 로컬 산출물 build context 제외
+├── docker/
+│   └── openscad-headless # Xvfb 기반 OpenSCAD 실행 adapter
 │
 ├── jobs/                 # Job 및 EventLog 도메인 패키지
 │   ├── models.py         # DB ORM 모델 (UUIDv7 및 parent_job_id 계보 구현)
@@ -95,45 +101,63 @@ CLI-Execution-Platform/
 
 ## 🚦 시작 가이드
 
-### 1. 의존성 설치 및 가상환경 설정
-```bash
-# 가상환경 생성
-python -m venv venv
+> **MVP 지원 환경**: Linux 서버와 WSL2만 지원합니다. 네이티브 Windows Python 및 Windows OpenSCAD 실행은 지원하지 않습니다.
 
-# 가상환경 활성화 (Windows)
-venv\Scripts\Activate.ps1
+### 1. 환경 변수 설정
 
-# 가상환경 활성화 (Linux/macOS)
-source venv/bin/activate
+`.env.sample`을 복사한 뒤 기존 PostgreSQL과 LLM 연결 정보를 입력합니다.
 
-# 의존 패키지 설치
-pip install -r requirements.txt
-```
-
-### 2. 로컬 PostgreSQL 및 환경 변수 설정
-데이터베이스 환경 및 LLM API 키 설정을 위해 `.env.sample`을 바탕으로 `.env` 파일을 생성합니다.
 ```bash
 cp .env.sample .env
 ```
-이후 `.env` 파일 내부의 데이터베이스 접속 경로(`DATABASE_URL`) 및 토큰 비밀키, LLM API 자격 증명을 작성하십시오.
 
-### 3. PostgreSQL 사용자 및 스키마 초기화
-로컬 PostgreSQL 데이터베이스에서 아래 쿼리를 실행하여 유저와 데이터베이스를 확보합니다.
-```sql
--- 1. 데이터베이스 및 유저 생성
-CREATE USER cli_user WITH PASSWORD 'cli_password';
-CREATE DATABASE cli_platform OWNER cli_user;
-GRANT ALL PRIVILEGES ON DATABASE cli_platform TO cli_user;
+Windows/SlowAPI 인코딩 호환성을 위해 `.env.sample`과 실제 `.env`의 주석 및 값은 ASCII 문자만 사용하십시오. 실제 `.env`는 Git이나 Docker 이미지에 포함하면 안 됩니다.
 
--- 2. 테이블 생성 (SQLAlchemy에 의해 첫 기동 시 자동 생성되나 필요 시 실행)
--- jobs 및 event_logs 테이블이 첫 서버 기동 시 자동으로 적재됩니다.
-```
+데이터베이스는 Docker Compose가 생성하지 않습니다. `DATABASE_URL`의 hostname은 컨테이너에서 접근 가능해야 합니다. DB가 Docker host에서 실행되는 경우 `localhost` 대신 `host.docker.internal`을 사용합니다.
 
-### 4. 로컬 서버 기동
+### 2. Docker Compose 실행 (권장)
+
+WSL2 또는 Linux에서 실행합니다.
+
 ```bash
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+docker compose config
+docker compose up --build -d
+docker compose ps
+docker compose logs -f app
 ```
-기동 후 웹 브라우저에서 [http://localhost:8000/docs](http://localhost:8000/docs)에 접속하면 Swagger UI 인터랙티브 API 명세서를 사용하실 수 있습니다.
+
+서비스가 healthy 상태가 되면 [http://localhost:8000/docs](http://localhost:8000/docs)에서 API를 확인합니다.
+
+OpenSCAD 설치 확인:
+
+```bash
+docker compose exec app /usr/local/bin/openscad-headless --version
+```
+
+종료 시 workspace volume을 보존하려면 `-v`를 사용하지 않습니다.
+
+```bash
+docker compose down
+```
+
+`docker compose down -v`는 Job workspace와 artifact를 삭제하므로 데이터 삭제가 명확히 필요한 경우에만 사용하십시오.
+
+### 3. WSL2에서 직접 실행
+
+Docker 없이 개발할 때도 WSL2 Linux shell에서 실행합니다.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y openscad xvfb
+
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+xvfb-run -a uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+오케스트레이션 오류 traceback은 서버 console에 기록됩니다. Docker 환경에서는 `docker compose logs -f app`으로 확인합니다.
 
 ---
 
@@ -142,12 +166,15 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 SQLite 인메모리 DB를 사용하므로 별도의 PostgreSQL 설정 없이 전체 테스트 자동 실행이 가능합니다.
 
 ```bash
-# 1. 전체 45개 테스트 시나리오 일괄 실행
-python -m pytest
+# 1. 전체 테스트 실행
+python -m pytest -q
 
 # 2. 상세 실행 및 디버그용 출력
 python -m pytest -v
 
 # 3. 특정 단위 테스트 개별 실행
 python -m pytest tests/test_unit_5.py -v
+
+# 4. 배포 구성 정적 테스트
+python -m pytest tests/test_deployment.py -v
 ```

@@ -104,3 +104,22 @@ EOF
 공식 부하 테스트 도구 기반 성능 검증은 MVP 단계에서 N/A 처리합니다.  
 이유: 로컬 단일 서버 MVP 환경이므로 스테이징 인프라 구축 후 수행이 적절하며,  
 핵심 성능 제약(Semaphore, Timeout, Rate Limit)은 단위 테스트로 동작 검증을 완료했습니다.
+
+---
+
+## R-13 Container Resource 기준
+
+- Compose 앱 service: CPU 2.0, memory 2GB
+- Uvicorn worker: 1
+- 동시 CLI: 2
+- CLI timeout: 30초
+- workspace: named volume
+
+정적 구성과 세마포어·timeout 단위 테스트는 통과했다. 실제 컨테이너에서 OpenSCAD STL/PNG의 CPU, memory와 30초 timeout 동작을 측정하는 성능 smoke는 Docker 미설치로 N/A이며 WSL2/Linux 환경에서 수행해야 한다.
+
+```bash
+docker stats
+docker compose exec app /usr/local/bin/openscad-headless -o /tmp/smoke.stl /tmp/smoke.scad
+```
+
+MVP는 단일 replica만 지원한다. Compose scale 테스트는 요구사항 범위 밖이다.

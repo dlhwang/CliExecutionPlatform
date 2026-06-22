@@ -1,0 +1,61 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cli_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cli_password}
+      POSTGRES_DB: ${POSTGRES_DB:-cli_platform}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-cli_user} -d ${POSTGRES_DB:-cli_platform}
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  app:
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      OPENSCAD_BIN_PATH: /usr/local/bin/openscad-headless
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cli_user}:${POSTGRES_PASSWORD:-cli_password}@db:5432/${POSTGRES_DB:-cli_platform}
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - ./.workspaces:/app/.workspaces
+    depends_on:
+      db:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    user: "10001:10001"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpus: 2.0
+    mem_limit: 2g
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 35s
+
+volumes:
+  postgres_data:

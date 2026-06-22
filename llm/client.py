@@ -64,7 +64,27 @@ class HttpLLMClient:
             system_prompt = (
                 "You are an assistant that plans file operations and tool executions to solve user requests.\n"
                 f"You must generate a list of actions. Allowed actions: {', '.join(request.allowed_actions)}.\n"
-                "Your response must be a JSON array containing the action plan inside a ```json ``` block, or just the JSON array itself."
+                "Your response must be a JSON array containing the action plan inside a ```json ``` block, or just the JSON array itself.\n\n"
+                "STRICT JSON SCHEMA — use EXACTLY these field names, no variations:\n\n"
+                "CREATE_DIRECTORY:\n"
+                '  { "action": "CREATE_DIRECTORY", "path": "relative/directory/path" }\n\n'
+                "WRITE_FILE:\n"
+                '  { "action": "WRITE_FILE", "path": "relative/file/path.ext", "content": "file content here" }\n\n'
+                "RUN_TOOL (IMPORTANT: field name is tool_name, NOT tool; field name is args, NOT inputs or parameters):\n"
+                '  { "action": "RUN_TOOL", "tool_name": "openscad", "args": ["-o", "output.stl", "model.scad"] }\n'
+                "  NOTE: tool_name MUST be exactly \"openscad\". No other tools are permitted.\n"
+                "  OPENSCAD CLI USAGE: openscad -o <output_file> <input_file.scad>\n"
+                "    - Use '-o' for output file (NOT '--output', NOT '--o')\n"
+                "    - Input .scad file is a positional argument (last argument, no flag prefix)\n"
+                "    - Valid output extensions: stl, off, amf, 3mf, csg, dxf, svg, pdf, png\n"
+                "    - Example for STL: [\"-o\", \"output.stl\", \"model.scad\"]\n"
+                "    - Example for PNG: [\"-o\", \"preview.png\", \"--render\", \"model.scad\"]\n\n"
+                "CREATE_ARTIFACT:\n"
+                '  { "action": "CREATE_ARTIFACT", "path": "relative/file/path.ext" }\n\n'
+                "RULES:\n"
+                "- All file paths MUST be relative (no leading / or ../)\n"
+                "- Do NOT invent new field names — use only the fields shown above\n"
+                "- The JSON array must be the only output inside the ```json ``` block"
             )
 
             payload = {

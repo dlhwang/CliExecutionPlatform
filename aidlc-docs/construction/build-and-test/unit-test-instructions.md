@@ -50,12 +50,13 @@ pytest tests/test_unit_3.py::test_timeout_kills_process -v
 |------|-----------|---------|------|------|------|
 | Unit 1 | `test_unit_1.py` | 4 | 4 | 0 | ✅ PASS |
 | Unit 2 | `test_unit_2.py` | 5 | 5 | 0 | ✅ PASS |
-| Unit 3 | `test_unit_3.py` | 8 | 8 | 0 | ✅ PASS |
+| Unit 3 | `test_unit_3.py` | 12 | 12 | 0 | ✅ PASS |
 | Unit 4 | `test_unit_4.py` | 16 | 16 | 0 | ✅ PASS |
-| Unit 5 | `test_unit_5.py` | 12 | 12 | 0 | ✅ PASS |
-| **합계** | | **45** | **45** | **0** | ✅ **ALL PASS** |
+| Unit 5 | `test_unit_5.py` | 16 | 16 | 0 | ✅ PASS |
+| Deployment | `test_deployment.py` | 5 | 5 | 0 | ✅ PASS |
+| **합계** | | **58** | **58** | **0** | ✅ **ALL PASS** |
 
-**실행 시간**: 3.25초 (로컬 SQLite 인메모리, 평균)
+**실행 시간**: 4.12초 (로컬 SQLite 인메모리, 평균)
 
 ---
 
@@ -92,6 +93,10 @@ pytest tests/test_unit_3.py::test_timeout_kills_process -v
 | `test_launch_retry_on_os_error` | NFR-1.3 | OSError 시 최대 2회 재시도 → CLIExecutionLaunchError 검증 |
 | `test_nonzero_exit_code_raises_cli_execution_error` | US-3-1 | Non-Zero Exit Code 시 CLIExecutionError 발생 검증 |
 | `test_semaphore_limits_concurrency` | NFR-1.2 | Semaphore(2) 동시성 제한 검증 |
+| `test_run_tool_uses_job_workspace_as_cwd` | R-13 | CLI 실행 시 `cwd`가 Job Workspace로 설정되는지 검증 |
+| `test_run_tool_rejects_missing_job_workspace` | R-13 | Job Workspace 디렉토리가 없을 시 실행을 차단하는지 검증 |
+| `test_run_tool_with_subdirectory_output_success` | R-14 | `/tmp` 격리 실행 중 하위 디렉토리를 포함한 결과물 stl이 정상 복사되는지 검증 |
+| `test_run_tool_with_traversal_output_fails` | R-14 | `/tmp` 격리 실행 후 결과물 복사 시 Path Traversal 우회 시도를 차단하는지 검증 |
 
 ### Unit 4 테스트
 
@@ -144,3 +149,41 @@ pytest tests/ -x
 # 특정 테스트만 격리 실행
 pytest tests/test_unit_3.py::test_timeout_kills_process -v -s
 ```
+
+---
+
+## R-14 활성 단위 테스트 결과
+
+실행 명령:
+
+```bash
+python -m pytest -v
+```
+
+또는 PYTHONPATH 및 모듈 임포트 방지를 위한 권장 실행 방식:
+
+```bash
+.\venv\Scripts\python -m pytest tests/ -v
+```
+
+| 영역 | 테스트 파일 | 테스트 수 | 결과 |
+| --- | --- | ---: | --- |
+| Unit 1 | `tests/test_unit_1.py` | 4 | Pass |
+| Unit 2 | `tests/test_unit_2.py` | 5 | Pass |
+| Unit 3 | `tests/test_unit_3.py` | 12 | Pass |
+| Unit 4 | `tests/test_unit_4.py` | 16 | Pass |
+| Unit 5 | `tests/test_unit_5.py` | 16 | Pass |
+| Deployment | `tests/test_deployment.py` | 5 | Pass |
+| 합계 | | 58 | 58 passed |
+
+R-14 직접 검증 테스트:
+
+- `test_run_tool_with_subdirectory_output_success` (하위 디렉토리 출력 생성 및 안전한 workspace 동기화 검증)
+- `test_run_tool_with_traversal_output_fails` (임시 격리 디렉토리 내 복사 과정에서의 상위 경로 탈출 시도 방어 검증)
+- `test_compose_defines_expected_services` (Docker Compose에 `db` 및 `app` 서비스가 포함되었는지 정적 검증)
+
+알려진 warning:
+
+- Starlette/httpx deprecation warning
+- 기존 timeout mock에서 생성된 coroutine의 unawaited warning
+- 실패에는 영향을 주지 않지만 후속 테스트 정리 대상으로 기록한다.

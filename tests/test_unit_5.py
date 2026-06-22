@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+import logging
 from uuid import UUID
 
 import httpx
@@ -278,3 +279,137 @@ def test_llm_client_openai_format():
 
     asyncio.run(scenario())
 
+
+def test_llm_client_system_prompt_contains_schema():
+    """R-10: 시스템 프롬프트에 RUN_TOOL의 정확한 필드명(tool_name, args)이 포함되어야 함."""
+    import json
+
+    async def scenario():
+        captured_payload = None
+
+        async def mock_handler(request):
+            nonlocal captured_payload
+            captured_payload = json.loads(request.read())
+            return httpx.Response(200, json={"choices": [{"message": {"content": "[]"}}]})
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(mock_handler))
+        adapter = HttpLLMClient(
+            client,
+            "https://api.openai.com/v1/chat/completions",
+            "secret",
+            "model",
+        )
+        await adapter.generate_plan(
+            LLMRequest("build a dice", {}, ("CREATE_DIRECTORY", "WRITE_FILE", "RUN_TOOL", "CREATE_ARTIFACT"))
+        )
+        await client.aclose()
+
+        system_content = captured_payload["messages"][0]["content"]
+        # tool_name 과 args 필드명이 시스템 프롬프트에 명시되어 있어야 함
+        assert "tool_name" in system_content, "시스템 프롬프트에 'tool_name' 필드명이 포함되어야 합니다"
+        assert '"args"' in system_content, "시스템 프롬프트에 'args' 필드명이 포함되어야 합니다"
+        assert "openscad" in system_content, "시스템 프롬프트에 허용 도구명 'openscad'가 명시되어야 합니다"
+        # 잘못된 필드명이 예시로 포함되어선 안 됨 (필드명 지시문만 포함)
+        assert '"tool":' not in system_content, "시스템 프롬프트에 잘못된 필드명 'tool'이 포함되어선 안 됩니다"
+        assert '"inputs":' not in system_content, "시스템 프롬프트에 잘못된 필드명 'inputs'가 포함되어선 안 됩니다"
+
+    asyncio.run(scenario())
+
+
+def test_orchestration_failed_log_includes_exception_detail(caplog, db_session, test_storage):
+    """R-10: ORCHESTRATION_FAILED 이벤트 메시지에 예외 상세 내용이 포함되어야 함."""
+    job = JobService(db_session, test_storage).create_job("fail prompt")
+
+    # LLM이 tool_name 대신 tool 필드를 반환하도록 잘못된 응답 주입
+    bad_response = '[{"action": "RUN_TOOL", "tool": "openscad", "inputs": {}}]'
+    llm_client = FakeLLMClient([bad_response])
+
+    service = JobOrchestratorService(
+        OrchestratorRepository(TestingSessionLocal),
+        TestingSessionLocal,
+        test_storage,
+        llm_client,
+        ActionPlanParser(),
+        SecurityPolicyValidator(test_storage.base_dir),
+        ActionExecutor(test_storage, FakeRunner(), TestingSessionLocal),
+        OrchestrationConcurrencyGate(),
+    )
+
+    with caplog.at_level(logging.ERROR, logger="orchestrator.service"):
+        result = asyncio.run(service.run(job.id))
+    assert result is False
+
+    server_log = next(
+        record
+        for record in caplog.records
+        if "Orchestration failed for job_id=" in record.getMessage()
+    )
+    assert str(job.id) in server_log.getMessage()
+    assert "LLMPlanValidationError" in server_log.getMessage()
+    assert server_log.exc_info is not None
+
+    db_session.expire_all()
+    failed_job = db_session.get(Job, job.id)
+    assert failed_job.status == "FAILED"
+
+    # ORCHESTRATION_FAILED 이벤트 로그에 상세 메시지 포함 여부 확인
+    # OrchestratorRepository.transition()은 event_type="SYSTEM_EVENT"로 저장하고
+    # 메시지는 "[ORCHESTRATION_FAILED] Orchestration failed: ..." 형식으로 저장됨
+    failed_log = (
+        db_session.query(EventLog)
+        .filter(
+            EventLog.job_id == job.id,
+            EventLog.event_type == "SYSTEM_EVENT",
+            EventLog.message.contains("ORCHESTRATION_FAILED"),
+        )
+        .first()
+    )
+    assert failed_log is not None
+    assert "LLMPlanValidationError" in failed_log.message
+    assert "Detail:" in failed_log.message, "에러 상세 메시지(Detail:)가 이벤트 로그에 포함되어야 합니다"
+    # 상세 메시지에 Pydantic 검증 오류 내용이 포함됨을 확인
+    assert "tool_name" in failed_log.message or "validation" in failed_log.message.lower()
+
+
+def test_orchestration_transition_failure_is_logged(caplog, db_session, test_storage):
+    """R-13: EventLog transition failure must not hide the original traceback."""
+    job = JobService(db_session, test_storage).create_job("sensitive prompt")
+
+    class FailingTransitionRepository(OrchestratorRepository):
+        def transition(
+            self,
+            job_id,
+            expected_statuses,
+            target_status,
+            event_code,
+            message,
+        ):
+            if event_code == "ORCHESTRATION_FAILED":
+                raise RuntimeError("event store unavailable")
+            return super().transition(
+                job_id,
+                expected_statuses,
+                target_status,
+                event_code,
+                message,
+            )
+
+    service = JobOrchestratorService(
+        FailingTransitionRepository(TestingSessionLocal),
+        TestingSessionLocal,
+        test_storage,
+        FakeLLMClient(['[{"action": "RUN_TOOL", "tool": "openscad"}]']),
+        ActionPlanParser(),
+        SecurityPolicyValidator(test_storage.base_dir),
+        ActionExecutor(test_storage, FakeRunner(), TestingSessionLocal),
+        OrchestrationConcurrencyGate(),
+    )
+
+    with caplog.at_level(logging.ERROR, logger="orchestrator.service"):
+        assert asyncio.run(service.run(job.id)) is False
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("Orchestration failed for job_id=" in message for message in messages)
+    assert any("Failed to persist orchestration failure" in message for message in messages)
+    assert all("sensitive prompt" not in message for message in messages)
+    assert sum(record.exc_info is not None for record in caplog.records) >= 2

@@ -1,4 +1,5 @@
 from collections.abc import Callable
+import logging
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -14,6 +15,8 @@ from orchestrator.concurrency import (
 )
 from orchestrator.repository import OrchestratorRepository
 from storage.interface import StorageService
+
+logger = logging.getLogger(__name__)
 
 INHERITED_FILES = ("model.scad", "design-spec.md")
 ALLOWED_ACTIONS = (
@@ -123,12 +126,23 @@ class JobOrchestratorService:
             )
             return True
         except Exception as exc:
-            self._repository.transition(
+            exc_detail = str(exc)
+            logger.exception(
+                "Orchestration failed for job_id=%s exception_type=%s",
                 job_id,
-                ("CREATED", "RUNNING"),
-                "FAILED",
-                "ORCHESTRATION_FAILED",
-                f"Orchestration failed: {type(exc).__name__}.",
+                type(exc).__name__,
             )
+            try:
+                self._repository.transition(
+                    job_id,
+                    ("CREATED", "RUNNING"),
+                    "FAILED",
+                    "ORCHESTRATION_FAILED",
+                    f"Orchestration failed: {type(exc).__name__}. Detail: {exc_detail}",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to persist orchestration failure for job_id=%s",
+                    job_id,
+                )
             return False
-

@@ -14,7 +14,9 @@ NFR 패턴 구현:
 import asyncio
 import os
 import random
+import shutil
 import sys
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -143,47 +145,186 @@ class CLIExecutionRunner:
     ) -> int:
         """30초 데드라인을 감싸는 래퍼. 타임아웃 발생 시 프로세스 강제 종료 및 TIMEOUT 마커 기록."""
         binary = self._openscad_bin
-        cmd = [binary] + args
+        workspace = self._resolve_job_workspace(job_id)
 
-        # Step 3: 프로세스 기동 (재시도 포함: NFR-1.3)
-        process, attempt_count = await self._launch_with_retry(cmd, cwd=None)
+        # /tmp 임시 디렉토리에서 실행 후 결과를 workspace로 복사
+        # - /tmp는 bind mount 권한과 무관하게 항상 쓰기 가능
+        # - 실행 완료 후 생성된 파일만 workspace로 복사하여 외부 노출
+        with tempfile.TemporaryDirectory(prefix=f"openscad_{job_id}_") as tmp_dir:
+            tmp_path = Path(tmp_dir)
 
-        # Step 4: 타임아웃 데드라인 + 스트림 수집 (NFR-1.1 + Q2)
-        try:
-            await asyncio.wait_for(
-                self._collect_streams(process, job_id, db),
-                timeout=timeout_seconds,
+            # 1. 실행 전 /tmp에 workspace의 디렉토리 구조 생성 (AC 1)
+            for dir_path in workspace.glob("**/"):
+                if dir_path.is_dir() and dir_path != workspace:
+                    # Path Traversal 방어 검증 (AC 4)
+                    if not dir_path.resolve().is_relative_to(workspace.resolve()):
+                        raise CLIExecutionLaunchError(
+                            message=f"Directory path traversal attempt detected: {dir_path}",
+                            target_path=str(dir_path),
+                            attempts=0,
+                        )
+                    rel_dir = dir_path.relative_to(workspace)
+                    target_dir = (tmp_path / rel_dir).resolve()
+                    if not target_dir.is_relative_to(tmp_path.resolve()):
+                        raise CLIExecutionLaunchError(
+                            message=f"Directory traversal outside tmp path: {target_dir}",
+                            target_path=str(target_dir),
+                            attempts=0,
+                        )
+                    target_dir.mkdir(parents=True, exist_ok=True)
+
+            # 2. CLI 실행에 필요한 입력 파일만 /tmp로 복사 (상대 경로 유지) (AC 2)
+            for src_file in workspace.glob("**/*.scad"):
+                if src_file.is_file():
+                    # Path Traversal 방어 검증 (AC 4)
+                    if not src_file.resolve().is_relative_to(workspace.resolve()):
+                        raise CLIExecutionLaunchError(
+                            message=f"File path traversal attempt detected: {src_file}",
+                            target_path=str(src_file),
+                            attempts=0,
+                        )
+                    rel_file = src_file.relative_to(workspace)
+                    dest_file = (tmp_path / rel_file).resolve()
+                    if not dest_file.is_relative_to(tmp_path.resolve()):
+                        raise CLIExecutionLaunchError(
+                            message=f"File traversal outside tmp path: {dest_file}",
+                            target_path=str(dest_file),
+                            attempts=0,
+                        )
+                    dest_file.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src_file, dest_file)
+
+            # 3. args의 -o 출력 경로를 파싱하여 출력 대상 부모 디렉토리를 /tmp 내부에 생성 (AC 3)
+            output_file_path = None
+            for idx, arg in enumerate(args):
+                if arg == "-o" and idx + 1 < len(args):
+                    output_file_path = args[idx + 1]
+                    break
+
+            if output_file_path:
+                out_path = Path(output_file_path)
+                # Path Traversal 방어 검증 (AC 4)
+                if out_path.is_absolute() or ".." in out_path.parts:
+                    raise CLIArgumentValidationError(offending_arg=output_file_path)
+                dest_dir = (tmp_path / out_path.parent).resolve()
+                if not dest_dir.is_relative_to(tmp_path.resolve()):
+                    raise CLIArgumentValidationError(offending_arg=output_file_path)
+                dest_dir.mkdir(parents=True, exist_ok=True)
+
+            # 4. 실행 전 파일 기준 스냅샷(Snapshot) 생성 (AC 5)
+            before_snapshot = {}
+            for f in tmp_path.glob("**/*"):
+                if f.is_file():
+                    if not f.resolve().is_relative_to(tmp_path.resolve()):
+                        continue
+                    rel_f = f.relative_to(tmp_path)
+                    stat = f.stat()
+                    before_snapshot[rel_f] = (stat.st_size, stat.st_mtime)
+
+            cmd = [binary] + args
+
+            # Step 3: 프로세스 기동 (재시도 포함: NFR-1.3)
+            process, attempt_count = await self._launch_with_retry(
+                cmd,
+                cwd=str(tmp_path),
             )
-        except asyncio.TimeoutError:
-            # 타임아웃: 프로세스 강제 종료 (SIGKILL)
+
+            # Step 4: 타임아웃 데드라인 + 스트림 수집 (NFR-1.1 + Q2)
             try:
-                process.kill()
-            except ProcessLookupError:
-                pass  # 이미 종료된 경우 무시
-            await process.wait()  # 좀비 프로세스 방지
+                await asyncio.wait_for(
+                    self._collect_streams(process, job_id, db),
+                    timeout=timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                # 타임아웃: 프로세스 강제 종료 (SIGKILL)
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass  # 이미 종료된 경우 무시
+                await process.wait()  # 좀비 프로세스 방지
 
-            # Q4: 부분 출력 보존 + TIMEOUT 마커 EventLog 기록
-            self._write_system_marker(
-                db=db,
-                job_id=job_id,
-                marker_type="TIMEOUT",
-                message=f"[SYSTEM] Process killed: execution exceeded {timeout_seconds}s timeout.",
-            )
+                # Q4: 부분 출력 보존 + TIMEOUT 마커 EventLog 기록
+                self._write_system_marker(
+                    db=db,
+                    job_id=job_id,
+                    marker_type="TIMEOUT",
+                    message=f"[SYSTEM] Process killed: execution exceeded {timeout_seconds}s timeout.",
+                )
 
-            raise CLIExecutionTimeoutError(
-                message=f"OpenSCAD tool execution timed out after {timeout_seconds} seconds. Process terminated.",
-                timeout_limit=timeout_seconds,
-            )
+                raise CLIExecutionTimeoutError(
+                    message=f"OpenSCAD tool execution timed out after {timeout_seconds} seconds. Process terminated.",
+                    timeout_limit=timeout_seconds,
+                )
 
-        # Step 5: Exit Code 검사
-        exit_code = process.returncode
-        if exit_code != 0:
-            raise CLIExecutionError(
-                message=f"OpenSCAD tool execution failed with exit code {exit_code}.",
-                exit_code=exit_code,
-            )
+            # Step 5: Exit Code 검사
+            exit_code = process.returncode
+            if exit_code != 0:
+                raise CLIExecutionError(
+                    message=f"OpenSCAD tool execution failed with exit code {exit_code}.",
+                    exit_code=exit_code,
+                )
+
+            # 5. 실행 전/후 snapshot 비교를 통해 새로 생성되거나 변경된 파일만 workspace에 반영 (AC 5, AC 6)
+            for f in tmp_path.glob("**/*"):
+                if f.is_file():
+                    if not f.resolve().is_relative_to(tmp_path.resolve()):
+                        continue
+                    rel_f = f.relative_to(tmp_path)
+                    
+                    stat = f.stat()
+                    is_new_or_modified = False
+                    if rel_f not in before_snapshot:
+                        is_new_or_modified = True
+                    else:
+                        old_size, old_mtime = before_snapshot[rel_f]
+                        if stat.st_size != old_size or stat.st_mtime != old_mtime:
+                            is_new_or_modified = True
+
+                    if is_new_or_modified:
+                        workspace_target = (workspace / rel_f).resolve()
+                        # Path Traversal 방어 검증 (AC 4)
+                        if not workspace_target.is_relative_to(workspace.resolve()):
+                            raise CLIExecutionError(
+                                message=f"Target path traversal attempt during copy: {workspace_target}"
+                            )
+
+                        # 기존 파일 충돌 차단 정책 (AC 6)
+                        if workspace_target.exists():
+                            is_explicit_output = False
+                            if output_file_path:
+                                explicit_output_path = (workspace / output_file_path).resolve()
+                                if workspace_target == explicit_output_path:
+                                    is_explicit_output = True
+
+                            if not is_explicit_output:
+                                raise CLIExecutionError(
+                                    message=f"Access denied: Attempted to overwrite existing non-output file in workspace: {rel_f}"
+                                )
+
+                        workspace_target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(f, workspace_target)
 
         return exit_code
+
+    def _resolve_job_workspace(self, job_id: uuid.UUID) -> Path:
+        """Resolve and validate the workspace used as the CLI working directory."""
+        jobs_root = (self.base_dir / "jobs").resolve()
+        workspace = (jobs_root / str(job_id)).resolve()
+
+        if not workspace.is_relative_to(jobs_root):
+            raise CLIExecutionLaunchError(
+                message=f"Job workspace is outside the configured jobs root: {workspace}",
+                target_path=str(workspace),
+                attempts=0,
+            )
+        if not workspace.is_dir():
+            raise CLIExecutionLaunchError(
+                message=f"Job workspace does not exist or is not a directory: {workspace}",
+                target_path=str(workspace),
+                attempts=0,
+            )
+
+        return workspace
 
     async def _launch_with_retry(
         self,

@@ -53,6 +53,13 @@ def _get_python_cmd() -> str:
     return sys.executable
 
 
+def _make_runner(tmp_path, job_id: uuid.UUID):
+    """Create a runner with an isolated Job workspace."""
+    workspace = tmp_path / "jobs" / str(job_id)
+    workspace.mkdir(parents=True)
+    return CLIExecutionRunner(base_dir=tmp_path), workspace
+
+
 # ──────────────────────────────────────────────────────────────
 # TC-3-1: 위험 인자 Allowlist 차단 검증 (NFR-1.4)
 # ──────────────────────────────────────────────────────────────
@@ -111,14 +118,14 @@ def test_argument_validation_allows_safe_args():
 # TC-3-3: 정상 실행 시 EventLog DB 적재 검증 (Q2)
 # ──────────────────────────────────────────────────────────────
 
-def test_run_tool_success_writes_event_logs(db_session):
+def test_run_tool_success_writes_event_logs(db_session, tmp_path):
     """
     정상 실행 시 CLI 출력이 EventLog 테이블에 CLI_OUTPUT 타입으로 적재되고
     Exit Code 0이 반환되는지 검증합니다.
     Python을 통해 실제 프로세스를 실행 (OpenSCAD 불필요).
     """
     job_id = _create_job(db_session)
-    runner = CLIExecutionRunner()
+    runner, _ = _make_runner(tmp_path, job_id)
 
     python_bin = _get_python_cmd()
     # python -c "print('hello'); print('world')" → 2줄 출력 후 Exit Code 0
@@ -156,14 +163,14 @@ def test_run_tool_success_writes_event_logs(db_session):
 # TC-3-4: 30초 타임아웃 메커니즘 검증 (NFR-1.1)
 # ──────────────────────────────────────────────────────────────
 
-def test_timeout_kills_process(db_session):
+def test_timeout_kills_process(db_session, tmp_path):
     """
     asyncio.wait_for의 타임아웃이 발동되면 프로세스가 강제 종료되고
     CLIExecutionTimeoutError가 발생하는지 검증합니다.
     asyncio.wait_for를 패치하여 즉시 TimeoutError를 발생시킵니다.
     """
     job_id = _create_job(db_session)
-    runner = CLIExecutionRunner()
+    runner, _ = _make_runner(tmp_path, job_id)
 
     python_bin = _get_python_cmd()
 
@@ -203,7 +210,7 @@ def test_timeout_kills_process(db_session):
 # TC-3-5: 타임아웃 시 부분 출력 보존 + TIMEOUT 마커 기록 (Q4)
 # ──────────────────────────────────────────────────────────────
 
-def test_timeout_preserves_partial_logs(db_session):
+def test_timeout_preserves_partial_logs(db_session, tmp_path):
     """
     타임아웃 발생 시 기존에 수집된 EventLog 레코드가 보존되고
     SYSTEM_EVENT 타입의 TIMEOUT 마커가 추가로 기록되는지 검증합니다.
@@ -219,7 +226,7 @@ def test_timeout_preserves_partial_logs(db_session):
     db_session.add(partial_log)
     db_session.commit()
 
-    runner = CLIExecutionRunner()
+    runner, _ = _make_runner(tmp_path, job_id)
 
     async def run_test():
         with patch("runner.service.ArgumentValidator.validate"):
@@ -261,14 +268,14 @@ def test_timeout_preserves_partial_logs(db_session):
 # TC-3-6: 프로세스 기동 실패 시 2회 재시도 후 CLIExecutionLaunchError (NFR-1.3)
 # ──────────────────────────────────────────────────────────────
 
-def test_launch_retry_on_os_error(db_session):
+def test_launch_retry_on_os_error(db_session, tmp_path):
     """
     asyncio.create_subprocess_exec가 OSError를 3회 연속 발생시킬 때
     최대 2회 재시도 후 CLIExecutionLaunchError가 발생하는지 검증합니다.
     실제 재시도 횟수(attempts=3)가 예외 속성에 정확히 기록되는지도 확인합니다.
     """
     job_id = _create_job(db_session)
-    runner = CLIExecutionRunner()
+    runner, _ = _make_runner(tmp_path, job_id)
     call_count = 0
 
     async def failing_create_subprocess(*args, **kwargs):
@@ -304,14 +311,14 @@ def test_launch_retry_on_os_error(db_session):
 # TC-3-7: Non-Zero Exit Code 시 CLIExecutionError 발생 (US-3-1)
 # ──────────────────────────────────────────────────────────────
 
-def test_nonzero_exit_code_raises_cli_execution_error(db_session):
+def test_nonzero_exit_code_raises_cli_execution_error(db_session, tmp_path):
     """
     프로세스가 정상 기동되었지만 Non-Zero Exit Code로 종료된 경우
     CLIExecutionError가 발생하고 exit_code 속성이 정확히 전달되는지 검증합니다.
     Python: sys.exit(1) 로 실제 Exit Code 1 발생.
     """
     job_id = _create_job(db_session)
-    runner = CLIExecutionRunner()
+    runner, _ = _make_runner(tmp_path, job_id)
     python_bin = _get_python_cmd()
 
     async def run_test():
@@ -330,6 +337,127 @@ def test_nonzero_exit_code_raises_cli_execution_error(db_session):
         assert "exit code 1" in err.message.lower() or "1" in err.message
 
     asyncio.get_event_loop().run_until_complete(run_test())
+
+
+def test_run_tool_uses_job_workspace_as_cwd(db_session, tmp_path):
+    """R-13/R-14: RUN_TOOL must execute from the temp isolation workspace (cwd)."""
+    job_id = _create_job(db_session)
+    runner, workspace = _make_runner(tmp_path, job_id)
+    
+    # workspace 에 model.scad가 없으면 에러가 나거나 복사되지 않으므로, 더미 생성
+    (workspace / "model.scad").write_text("cube(10);")
+    
+    process = MagicMock(returncode=0)
+
+    async def run_test():
+        with patch("runner.service.ArgumentValidator.validate"):
+            with patch.object(
+                runner,
+                "_launch_with_retry",
+                new_callable=AsyncMock,
+                return_value=(process, 1),
+            ) as launch:
+                with patch.object(
+                    runner,
+                    "_collect_streams",
+                    new_callable=AsyncMock,
+                ):
+                    assert await runner.run_tool(
+                        job_id=job_id,
+                        tool_name="openscad",
+                        args=["-o", "output.stl", "model.scad"],
+                        db=db_session,
+                    ) == 0
+
+        # launch할 때의 cwd가 openscad_{job_id}_ 형식인지 확인
+        launched_cwd = launch.await_args.kwargs["cwd"]
+        assert f"openscad_{job_id}_" in launched_cwd
+
+    asyncio.get_event_loop().run_until_complete(run_test())
+
+
+def test_run_tool_rejects_missing_job_workspace(db_session, tmp_path):
+    """R-13: A missing workspace fails before a subprocess is launched."""
+    job_id = _create_job(db_session)
+    runner = CLIExecutionRunner(base_dir=tmp_path)
+
+    async def run_test():
+        with patch("runner.service.ArgumentValidator.validate"):
+            with patch(
+                "runner.service.asyncio.create_subprocess_exec",
+                new_callable=AsyncMock,
+            ) as create_process:
+                with pytest.raises(CLIExecutionLaunchError) as exc_info:
+                    await runner.run_tool(
+                        job_id=job_id,
+                        tool_name="openscad",
+                        args=["model.scad"],
+                        db=db_session,
+                    )
+
+        assert exc_info.value.attempts == 0
+        assert str(job_id) in exc_info.value.target_path
+        assert "does not exist" in exc_info.value.message
+        create_process.assert_not_awaited()
+
+    asyncio.get_event_loop().run_until_complete(run_test())
+
+
+def test_run_tool_with_subdirectory_output_success(db_session, tmp_path):
+    """R-14: run_tool succeeds with output path containing subdirectories."""
+    job_id = _create_job(db_session)
+    runner, workspace = _make_runner(tmp_path, job_id)
+    
+    # 1. workspace 하위에 입력 디렉토리 및 파일 모의 준비
+    (workspace / "dice_design").mkdir(parents=True, exist_ok=True)
+    (workspace / "dice_design" / "octahedron_dice.scad").write_text("cube(10);")
+    
+    # 실제 OpenSCAD 대신 python script를 이용해 출력 파일을 생성하도록 mocking
+    python_bin = _get_python_cmd()
+    
+    async def run_test():
+        with patch.object(runner, "_openscad_bin", python_bin):
+            with patch("runner.service.ArgumentValidator.validate"):
+                # python -c "import os; os.makedirs('dice_design', exist_ok=True); open('dice_design/octahedron_dice.stl', 'w').write('dummy stl')"
+                exit_code = await runner.run_tool(
+                    job_id=job_id,
+                    tool_name="openscad",
+                    args=["-c", "import os; os.makedirs('dice_design', exist_ok=True); open('dice_design/octahedron_dice.stl', 'w').write('dummy stl')", "-o", "dice_design/octahedron_dice.stl", "dice_design/octahedron_dice.scad"],
+                    db=db_session,
+                )
+                assert exit_code == 0
+
+    asyncio.get_event_loop().run_until_complete(run_test())
+    
+    # 2. 결과 stl 파일이 workspace의 dice_design/ 하위로 성공적으로 복사되었는지 검증
+    expected_output = workspace / "dice_design" / "octahedron_dice.stl"
+    assert expected_output.exists()
+    assert expected_output.read_text() == "dummy stl"
+
+
+def test_run_tool_with_traversal_output_fails(db_session, tmp_path):
+    """R-14: run_tool rejects output paths attempting path traversal."""
+    job_id = _create_job(db_session)
+    runner, workspace = _make_runner(tmp_path, job_id)
+    (workspace / "model.scad").write_text("cube(10);")
+    
+    traversal_cases = [
+        ["-o", "../escape.stl", "model.scad"],
+        ["-o", "/tmp/escape.stl", "model.scad"],
+    ]
+    
+    async def run_test():
+        for args in traversal_cases:
+            with pytest.raises((CLIArgumentValidationError, CLIExecutionError, ValueError)):
+                await runner.run_tool(
+                    job_id=job_id,
+                    tool_name="openscad",
+                    args=args,
+                    db=db_session,
+                )
+                
+    asyncio.get_event_loop().run_until_complete(run_test())
+
 
 
 # ──────────────────────────────────────────────────────────────
