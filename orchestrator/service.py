@@ -105,18 +105,26 @@ class JobOrchestratorService:
             db = self._session_factory()
             try:
                 validation_cb = lambda acts: self._validator.validate_actions(acts, job_id, db)
-                actions = await retry_executor.generate_actions(request, validation_cb=validation_cb)
+                async def execution_cb(acts):
+                    await self._action_executor.execute_attempt(
+                        job_id,
+                        acts,
+                        on_success=lambda: self._repository.save_action_plan(job_id, acts),
+                    )
+
+                actions = await retry_executor.generate_actions(
+                    request,
+                    validation_cb=validation_cb,
+                    execution_cb=execution_cb,
+                )
             finally:
                 db.close()
 
-
-            self._repository.save_action_plan(job_id, actions)
             self._repository.append_event(
                 job_id,
-                "PLAN_VALIDATED",
-                "Action plan validated.",
+                "PLAN_EXECUTED",
+                "Final action plan validated, executed, and persisted.",
             )
-            await self._action_executor.execute(job_id, actions)
             self._repository.transition(
                 job_id,
                 ("RUNNING",),

@@ -43,3 +43,15 @@ docker image history cli-execution-platform-app
 
 현재 환경에는 Docker CLI가 없어 동적 보안 검증은 N/A입니다. 정적 및 격리 실행 보안 검증은 전체 pytest에 포함되어 통과했습니다.
 
+## R-15A/B/C 정보 노출 및 격리 검증
+
+- 정적 validation feedback에 전체 SCAD content가 포함되지 않는지 검증
+- `CLIExecutionError.__str__`와 diagnostics가 bounded tail 밖의 process output, action plan JSON 및 traceback을 포함하지 않는지 검증
+- failed attempt의 workspace 및 artifact 변경이 rollback되는지 검증
+- non-idempotent external action이 runtime refinement allowlist에 포함되지 않는지 검증
+
+실행 명령:
+
+```powershell
+.\venv\Scripts\python.exe -m pytest tests/test_unit_2.py tests/test_unit_3.py tests/test_unit_5.py -q
+```

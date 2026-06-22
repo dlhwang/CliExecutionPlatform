@@ -60,6 +60,92 @@ CLI runtime: OpenSCAD CLI"
 
 ---
 
+## Code Generation Change Request (원문 보정) - Hotfix Cycle (R-15 Runtime Refinement)
+**Timestamp**: 2026-06-22T14:58:09+09:00
+**User Input**: "AGENTS.md 읽고 진행해줘
+```
+[System] 스트림 서버에 연결 중... (http://localhost:8000/api/v1/jobs/019eede1-d6c8-718c-ab0a-3d1fdcfe51b4/stream)
+[System] 실시간 로그 스트림에 연결되었습니다.
+Job created and workspace initialized.
+[ORCHESTRATION_STARTED] Orchestration started.
+[LLM_ATTEMPT] LLM plan request attempt 1.
+[PLAN_VALIDATED] Action plan validated.
+WARNING: Ignoring 3D child object for 2D operation in file die.scad, line 49
+Geometries in cache: 44
+Geometry cache size in bytes: 321208
+CGAL Polyhedrons in cache: 12
+CGAL cache size in bytes: 4026824
+Total rendering time: 0:00:00.574
+Current top level object is empty.
+[ORCHESTRATION_FAILED] Orchestration failed: CLIExecutionError. Detail: OpenSCAD tool execution failed with exit code 1.
+[Error] 작업이 비정상 종료되었습니다.
+```
+
+생성해봤는데 위처럼 이벤트스트림을 받았어
+
+```
+app-1  | 2026-06-22 05:51:06,912 [INFO] httpx: HTTP Request: POST https://api.openai.com/v1/chat/completions \"HTTP/1.1 200 OK\"
+app-1  | 2026-06-22 05:51:07,650 [ERROR] orchestrator.service: Orchestration failed for job_id=019eede1-d6c8-718c-ab0a-3d1fdcfe51b4 exception_type=CLIExecutionError
+app-1  | Traceback (most recent call last):
+app-1  |   File \"/app/orchestrator/service.py\", line 119, in _run_in_slot
+app-1  |     await self._action_executor.execute(job_id, actions)
+app-1  |   File \"/app/orchestrator/actions.py\", line 36, in execute
+app-1  |     await self._runner.run_tool(
+app-1  |     ...<4 lines>...
+app-1  |     )
+app-1  |   File \"/app/runner/service.py\", line 126, in run_tool
+app-1  |     return await self._execute_with_timeout(
+app-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app-1  |     ...<5 lines>...
+app-1  |     )
+app-1  |     ^
+app-1  |   File \"/app/runner/service.py\", line 262, in _execute_with_timeout
+app-1  |     raise CLIExecutionError(
+app-1  |     ...<2 lines>...
+app-1  |     )
+app-1  | runner.exceptions.CLIExecutionError: OpenSCAD tool execution failed with exit code 1.
+```
+
+위에는 도커 내부 로그야
+
+### Goal
+1. CLIExecutionError에 stdout/stderr 포함
+2. OpenSCAD empty top-level object 감지
+3. \"Ignoring 3D child object for 2D operation\" 감지
+4. 해당 메시지를 LLM retry feedback으로 전달
+5. 필요하면 ScadStaticValidator에 2D/3D 혼용 휴리스틱 추가"
+**AI Response**: "기존 R-15 Code Generation 컨텍스트를 복원하고 런타임 refinement 보완 요구사항을 요구사항 문서와 코드 생성 계획 Step 11~16에 반영했습니다. 애플리케이션 코드 변경 전 명시적 승인을 요청합니다."
+**Context**: CONSTRUCTION - Code Generation Part 1 계획 보완. Security Baseline 및 Property-Based Testing 확장은 기존 설정에 따라 비활성화 상태를 유지함.
+
+---
+
+## Code Generation Plan Approval Prompt - Hotfix Cycle (R-15 Runtime Refinement)
+**Timestamp**: 2026-06-22T14:58:09+09:00
+**User Input**: ""
+**AI Response**: "R-15 런타임 refinement 보완 계획의 Step 11~16을 검토해 주세요. Request Changes 또는 Continue to Code Generation 중 하나로 명시적 승인을 요청합니다."
+**Context**: 승인 전 대기. 계획 문서: aidlc-docs/construction/plans/r-15-scad-validation-code-generation-plan.md
+
+---
+
+## Code Generation Plan Split Request - Hotfix R-15A/R-15B/R-15C
+**Timestamp**: 2026-06-22T16:18:40+09:00
+**User Input**: "개선을 쪼개는 게 어떨까
+R-15A: 정적 검증 + prompt 강화 + validation callback + bounded validation feedback
+R-15B: CLIExecutionError stdout/stderr 수집 + diagnostics + runtime refinement
+R-15C: orchestrator 실행 흐름 단일화 + 최종 plan 저장 시점 변경"
+**AI Response**: "R-15를 A/B/C로 분리하고 각 변경의 계층, 의존성, 테스트 및 승인 경계를 별도 코드 생성 계획으로 재구성했습니다."
+**Context**: Code Generation Part 1 계획 변경. R-15A는 완료 범위, R-15B는 runner diagnostics, R-15C는 orchestration runtime refinement로 분리함.
+
+---
+
+## Split Code Generation Plans Approval Prompt - Hotfix R-15B/R-15C
+**Timestamp**: 2026-06-22T16:18:40+09:00
+**User Input**: ""
+**AI Response**: "R-15B와 R-15C 분리 계획을 검토하고 Request Changes 또는 Continue to Code Generation으로 명시적 승인해 달라고 요청함."
+**Context**: R-15B와 R-15C 구현 전 승인 대기.
+
+---
+
 ## 세션 지침 입력
 **Timestamp**: 2026-06-22T09:21:11.0804219+09:00
 **User Input**: "# AGENTS.md instructions for D:\workspace\CLI-Execution-Platform
@@ -1865,4 +1951,240 @@ D:\workspace\CLI-Execution-Platform\AGENTS.md를 읽고 한게 맞니"
 **AI Response**: "R-15 핫픽스 및 보완 작업 완료를 위해 커밋 메시지 후보들을 추천합니다."
 **Context**: Recommending git commit messages summarizing the SCAD validator, feedback constraints, and copyfile replacement changes.
 
+---
 
+## Korean Commit Message Recommendation - Hotfix Cycle (R-15 Completion)
+**Timestamp**: 2026-06-22T14:47:48+09:00
+**User Input**: "한글로 해주"
+**AI Response**: "한글 Git 커밋 메시지 후보들을 추천합니다."
+**Context**: Recommending Korean git commit messages for R-15.
+
+---
+
+## CLI Runtime Execution Error Handling - Hotfix Cycle (R-15 Run-Time Follow-up)
+**Timestamp**: 2026-06-22T14:54:13+09:00
+**User Input**: "[System] 스트림 서버에 연결 중... (http://localhost:8000/api/v1/jobs/019eede1-d6c8-718c-ab0a-3d1fdcfe51b4/stream)
+[System] 실시간 로그 스트림에 연결되었습니다.
+Job created and workspace initialized.
+[ORCHESTRATION_STARTED] Orchestration started.
+[LLM_ATTEMPT] LLM plan request attempt 1.
+[PLAN_VALIDATED] Action plan validated.
+WARNING: Ignoring 3D child object for 2D operation in file die.scad, line 49
+Geometries in cache: 44
+Geometry cache size in bytes: 321208
+CGAL Polyhedrons in cache: 12
+CGAL cache size in bytes: 4026824
+Total rendering time: 0:00:00.574
+Current top level object is empty.
+[ORCHESTRATION_FAILED] Orchestration failed: CLIExecutionError. Detail: OpenSCAD tool execution failed with exit code 1.
+[Error] 작업이 비정상 종료되었습니다.
+
+생성해봤는데 위처럼 이벤트스트림을 받았어
+
+app-1  | 2026-06-22 05:51:06,912 [INFO] httpx: HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+app-1  | 2026-06-22 05:51:07,650 [ERROR] orchestrator.service: Orchestration failed for job_id=019eede1-d6c8-718c-ab0a-3d1fdcfe51b4 exception_type=CLIExecutionError
+app-1  | Traceback (most recent call last):
+app-1  |   File "/app/orchestrator/service.py", line 119, in _run_in_slot
+app-1  |     await self._action_executor.execute(job_id, actions)
+app-1  |   File "/app/orchestrator/actions.py", line 36, in execute
+app-1  |     await self._runner.run_tool(
+app-1  |     ...<4 lines>...
+app-1  |     )
+app-1  |   File "/app/runner/service.py", line 126, in run_tool
+app-1  |     return await self._execute_with_timeout(
+app-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app-1  |     ...<5 lines>...
+app-1  |     )
+app-1  |     ^
+app-1  |   File "/app/runner/service.py", line 262, in _execute_with_timeout
+app-1  |     raise CLIExecutionError(
+app-1  |     ...<2 lines>...
+app-1  |     )
+app-1  | runner.exceptions.CLIExecutionError: OpenSCAD tool execution failed with exit code 1.
+
+위에는 도커 내부 로그야"
+**AI Response**: "OpenSCAD 런타임 렌더링 에러로 인한 CLI 실행 실패 상황을 식별했습니다. 이 문제를 해결하기 위해, CLIExecutionError 발생 시 stderr 등의 런타임 오류 출력을 수집하여 예외 정보로 제공하고, 이를 refinement loop의 피드백으로 전달하도록 보완하는 계획(r-15-scad-validation-code-generation-plan.md)을 수립하여 승인을 요청합니다."
+**Context**: Initiating code generation plan adjustments to incorporate runtime CLI execution error feedback into refinement loop.
+
+---
+
+## 감사 로그 Append 위치 보정 - Hotfix Cycle (R-15 Runtime Refinement)
+**Timestamp**: 2026-06-22T14:58:09+09:00
+**User Input (verbatim)**:
+~~~text
+AGENTS.md 읽고 진행해줘
+```
+[System] 스트림 서버에 연결 중... (http://localhost:8000/api/v1/jobs/019eede1-d6c8-718c-ab0a-3d1fdcfe51b4/stream)
+[System] 실시간 로그 스트림에 연결되었습니다.
+Job created and workspace initialized.
+[ORCHESTRATION_STARTED] Orchestration started.
+[LLM_ATTEMPT] LLM plan request attempt 1.
+[PLAN_VALIDATED] Action plan validated.
+WARNING: Ignoring 3D child object for 2D operation in file die.scad, line 49
+Geometries in cache: 44
+Geometry cache size in bytes: 321208
+CGAL Polyhedrons in cache: 12
+CGAL cache size in bytes: 4026824
+Total rendering time: 0:00:00.574
+Current top level object is empty.
+[ORCHESTRATION_FAILED] Orchestration failed: CLIExecutionError. Detail: OpenSCAD tool execution failed with exit code 1.
+[Error] 작업이 비정상 종료되었습니다.
+```
+
+생성해봤는데 위처럼 이벤트스트림을 받았어
+
+```
+app-1  | 2026-06-22 05:51:06,912 [INFO] httpx: HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+app-1  | 2026-06-22 05:51:07,650 [ERROR] orchestrator.service: Orchestration failed for job_id=019eede1-d6c8-718c-ab0a-3d1fdcfe51b4 exception_type=CLIExecutionError
+app-1  | Traceback (most recent call last):
+app-1  |   File "/app/orchestrator/service.py", line 119, in _run_in_slot
+app-1  |     await self._action_executor.execute(job_id, actions)
+app-1  |   File "/app/orchestrator/actions.py", line 36, in execute
+app-1  |     await self._runner.run_tool(
+app-1  |     ...<4 lines>...
+app-1  |     )
+app-1  |   File "/app/runner/service.py", line 126, in run_tool
+app-1  |     return await self._execute_with_timeout(
+app-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app-1  |     ...<5 lines>...
+app-1  |     )
+app-1  |     ^
+app-1  |   File "/app/runner/service.py", line 262, in _execute_with_timeout
+app-1  |     raise CLIExecutionError(
+app-1  |     ...<2 lines>...
+app-1  |     )
+app-1  | runner.exceptions.CLIExecutionError: OpenSCAD tool execution failed with exit code 1.
+```
+
+위에는 도커 내부 로그야
+
+### Goal
+1. CLIExecutionError에 stdout/stderr 포함
+2. OpenSCAD empty top-level object 감지
+3. "Ignoring 3D child object for 2D operation" 감지
+4. 해당 메시지를 LLM retry feedback으로 전달
+5. 필요하면 ScadStaticValidator에 2D/3D 혼용 휴리스틱 추가
+~~~
+**AI Response**: "R-15 런타임 refinement 보완 요구사항과 코드 생성 계획 Step 11~16을 작성하고 명시적 승인을 요청함."
+**Context**: 앞선 동일 항목이 파일 중간에 삽입된 기록상 오류를 정정하기 위해, 원문을 파일 끝에 append함. 원문의 첫 번째 닫는 코드 펜스 뒤 공백은 사용자 입력 그대로 보존함.
+
+---
+
+## Code Generation Plan Approval Prompt - Hotfix Cycle (R-15 Runtime Refinement)
+**Timestamp**: 2026-06-22T14:58:09+09:00
+**User Input**: ""
+**AI Response**: "R-15 런타임 refinement 보완 계획 Step 11~16에 대한 명시적 승인을 요청함. 선택지는 Request Changes 또는 Continue to Code Generation임."
+**Context**: 승인 전 대기. 계획 문서: aidlc-docs/construction/plans/r-15-scad-validation-code-generation-plan.md
+
+---
+
+## Code Generation Plan Split Request Append 보정 - Hotfix R-15A/R-15B/R-15C
+**Timestamp**: 2026-06-22T16:18:40+09:00
+**User Input**: "개선을 쪼개는 게 어떨까
+R-15A: 정적 검증 + prompt 강화 + validation callback + bounded validation feedback
+R-15B: CLIExecutionError stdout/stderr 수집 + diagnostics + runtime refinement
+R-15C: orchestrator 실행 흐름 단일화 + 최종 plan 저장 시점 변경"
+**AI Response**: "R-15A는 완료 범위로 확정하고, R-15B runner diagnostics 계획과 R-15C orchestration runtime refinement 계획을 별도 문서로 분리했습니다. R-15B와 R-15C 구현 전 명시적 승인을 요청합니다."
+**Context**: 동일 입력의 앞선 기록이 파일 중간에 삽입되어, 감사 로그 append 규칙에 맞게 파일 끝에 다시 기록함.
+
+---
+
+## R-15A/B/C Contract Refinement
+**Timestamp**: 2026-06-22T16:27:42+09:00
+**User Input**: "R-15A:
+Static validation must analyze code after comment masking while preserving original line numbers. Rules that detect syntax-like patterns such as vector property access and radian conversion must ignore comments and double-quoted string literals to avoid false positives. Feedback must include only bounded rule summaries and representative line snippets, never the full SCAD content.
+---
+R-15B:
+Diagnostics must be generated from bounded stdout/stderr tails only. The full process output, generated SCAD content, action plan JSON, and traceback must never be embedded into CLIExecutionError.__str__ or diagnostics feedback.
+stdout and stderr must be drained concurrently to avoid subprocess pipe deadlock. Each emitted line must continue to be persisted as the existing CLI_OUTPUT event, while bounded per-stream tails are retained for CLIExecutionError and diagnostics.
+---
+R-15C Additional Contracts
+
+1. generate_actions becomes the single owner of parse -> validation -> execution refinement.
+2. execution_cb must run after validation and before returning final actions.
+3. Runtime failures must be converted into bounded feedback using R-15B diagnostics.
+4. Feedback must contain only the current attempt failure; previous feedback must not be accumulated.
+5. Only the actions from a successfully executed attempt may be returned and persisted.
+6. Each execution attempt must run in an isolated attempt workspace, or an equivalent tested cleanup/overwrite policy must be applied.
+7. Failed attempt artifacts must not be promoted as final job artifacts.
+8. Non-idempotent external side effects are outside the runtime refinement retry boundary.
+9. Job must transition to COMPLETED only after final plan persistence and successful execution.
+10. On exhausted attempts, job must transition to FAILED with bounded failure reason."
+**AI Response**: "R-15A/B/C 계획과 요구사항 추적성에 추가 계약을 반영했습니다. 현재 구현과의 차이로 인해 R-15A를 보완 필요 상태로 되돌리고, 구현 전 재승인을 요청합니다."
+**Context**: Code Generation Part 1 계획 변경. R-15C의 동등 격리 정책으로 workspace snapshot/rollback 및 artifact 지연 승격을 선택함.
+
+---
+
+## R-15A/B/C Code Generation Plan Approval
+**Timestamp**: 2026-06-22T16:31:53+09:00
+**User Input**: "R-15A/B/C 계획 승인"
+**AI Response**: "R-15A/B/C 계획 승인을 기록하고 R-15A → R-15B → R-15C 순차 구현을 시작함."
+**Status**: Approved
+**Context**: CONSTRUCTION - Code Generation Part 2 시작.
+
+---
+
+## R-15A/B/C Code Generation Complete
+**Timestamp**: 2026-06-22T16:50:42+09:00
+**User Input**: ""
+**AI Response**: "R-15A/B/C 구현과 자동화 검증을 완료했습니다. 정적 masking, bounded CLI diagnostics, concurrent stream drain, runtime refinement, attempt rollback, artifact 지연 승격 및 최종 plan 저장 순서를 구현했고 전체 79개 테스트가 통과했습니다. Code Generation 검토 승인을 요청합니다."
+**Context**: CONSTRUCTION - Code Generation Part 2 완료. Build and Test 단계로 이동하기 전 명시적 승인 대기.
+
+---
+
+## R-15A/B/C Code Generation Approval
+**Timestamp**: 2026-06-22T16:54:57+09:00
+**User Input**: "Continue to Next Stage"
+**AI Response**: "Code Generation 승인을 기록하고 Build and Test 단계로 전환함."
+**Status**: Approved
+**Context**: CONSTRUCTION - Build and Test 시작.
+
+---
+
+## Build and Test Stage - R-15A/B/C
+**Timestamp**: 2026-06-22T16:58:39+09:00
+**Build Status**: Success
+**Test Status**: Pass - 79 passed, 0 failed
+**Requirement Verification Status**: Complete, Docker/OpenSCAD container acceptance N/A
+**Requirement Verification Evidence**:
+- R-15A comment/string masking 및 bounded feedback -> `tests/test_unit_2.py` -> Pass
+- R-15B concurrent drain, EventLog 및 bounded diagnostics -> `tests/test_unit_3.py` -> Pass
+- R-15C runtime refinement, rollback, artifact 비승격 및 상태 전이 -> `tests/test_unit_5.py` -> Pass
+- 전체 회귀 -> `tests/` 79개 -> Pass
+- Docker/OpenSCAD 실제 smoke -> Docker CLI 부재 -> N/A
+**Files Updated**:
+- build-instructions.md
+- unit-test-instructions.md
+- integration-test-instructions.md
+- performance-test-instructions.md
+- security-test-instructions.md
+- build-and-test-summary.md
+**AI Response**: "Build and Test 완료 결과를 제시하고 Operations 단계 진행 승인을 요청함."
+**Context**: Build and Test 완료. Operations 전 명시적 승인 대기.
+
+---
+
+## Build and Test Approval - R-15A/B/C
+**Timestamp**: 2026-06-22T17:00:05+09:00
+**User Input**: "Approve & Continue"
+**AI Response**: "Build and Test 승인을 기록하고 Operations placeholder를 완료 처리함."
+**Status**: Approved
+**Context**: OPERATIONS - Placeholder.
+
+---
+
+## Operations Completion - R-15A/B/C
+**Timestamp**: 2026-06-22T17:00:05+09:00
+**Status**: Complete
+**AI Response**: "R-15A/B/C AI-DLC lifecycle 완료. 배포 실행은 수행하지 않았으며 Docker/OpenSCAD 실제 smoke를 운영 전 조건으로 유지함."
+**Context**: Operations는 현재 AI-DLC 규칙상 placeholder이며 추가 배포·모니터링 변경 없음.
+
+---
+
+## Commit Message Recommendation
+**Timestamp**: 2026-06-22T17:08:11+09:00
+**User Input**: "커밋메시지 추천"
+**AI Response**: "R-15A/B/C 변경 범위를 반영한 한글 커밋 메시지를 추천함."
+**Context**: 완료된 구현에 대한 커밋 메시지 제안. Git commit은 수행하지 않음.
+
+---

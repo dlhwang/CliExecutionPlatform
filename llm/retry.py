@@ -4,6 +4,8 @@ from typing import Any
 
 from llm.client import LLMClient, LLMClientError, LLMRequest
 from llm.parser import ActionPlanParser, LLMPlanRetryableException, LLMPlanValidationError
+from runner.diagnostics import build_runtime_feedback
+from runner.exceptions import CLIExecutionError
 
 RETRY_DELAYS_SECONDS = (1.0, 2.0)
 
@@ -28,6 +30,7 @@ class LLMPlanRetryExecutor:
         self,
         request: LLMRequest,
         validation_cb: Callable[[Any], None] | None = None,
+        execution_cb: Callable[[Any], Awaitable[None]] | None = None,
     ):
         current_request = request
         for attempt in range(len(self._delays) + 1):
@@ -38,6 +41,8 @@ class LLMPlanRetryExecutor:
                 actions = self._parser.parse_action_plan(response)
                 if validation_cb:
                     validation_cb(actions)
+                if execution_cb:
+                    await execution_cb(actions)
                 return actions
             except LLMClientError as exc:
                 if not exc.retryable or attempt >= len(self._delays):
@@ -51,9 +56,12 @@ class LLMPlanRetryExecutor:
                 if exc.status_code == 403 or attempt >= len(self._delays):
                     raise
                 feedback = exc.message
+            except CLIExecutionError as exc:
+                if attempt >= len(self._delays):
+                    raise
+                feedback = build_runtime_feedback(exc)
 
             await self._sleep(self._delays[attempt])
             current_request = current_request.with_retry_feedback(feedback)
-
 
 

@@ -15,6 +15,15 @@ CLI Runner Service의 커스텀 예외 계층 정의.
 from typing import Optional
 
 
+MAX_STREAM_TAIL_CHARS = 4000
+
+
+def _bounded_stream_tail(value: str) -> str:
+    if len(value) <= MAX_STREAM_TAIL_CHARS:
+        return value
+    return "...[truncated]\n" + value[-MAX_STREAM_TAIL_CHARS:]
+
+
 class CLIExecutionError(RuntimeError):
     """
     OpenSCAD 프로세스가 정상 기동 후 비정상 종료(Non-Zero Exit Code)되었을 때 발생하는 기본 예외.
@@ -23,13 +32,33 @@ class CLIExecutionError(RuntimeError):
         message (str): 실패 사유 요약 메시지
         exit_code (Optional[int]): 프로세스가 반환한 비정상 종료 코드
     """
-    def __init__(self, message: str, exit_code: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        exit_code: Optional[int] = None,
+        *,
+        stdout: str = "",
+        stderr: str = "",
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.exit_code = exit_code
+        self.stdout = _bounded_stream_tail(stdout)
+        self.stderr = _bounded_stream_tail(stderr)
+
+    def __str__(self) -> str:
+        parts = [self.message]
+        if self.stdout:
+            parts.append(f"stdout (bounded tail):\n{self.stdout}")
+        if self.stderr:
+            parts.append(f"stderr (bounded tail):\n{self.stderr}")
+        return "\n".join(parts)
 
     def __repr__(self) -> str:
-        return f"CLIExecutionError(message={self.message!r}, exit_code={self.exit_code!r})"
+        return (
+            f"CLIExecutionError(message={self.message!r}, exit_code={self.exit_code!r}, "
+            f"stdout_chars={len(self.stdout)}, stderr_chars={len(self.stderr)})"
+        )
 
 
 class CLIExecutionLaunchError(CLIExecutionError):

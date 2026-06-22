@@ -141,3 +141,27 @@ docker compose up -d
 
 현재 검증 환경에는 Docker CLI와 설치된 WSL 배포판이 없어 위 3개 container 통합 시나리오는 N/A입니다. WSL2 또는 Linux Docker 환경에서 필수 후속 검증으로 수행해야 합니다.
 
+---
+
+## R-15A/B/C 통합 시나리오
+
+### 시나리오 1: Runner diagnostics → LLM retry
+
+- 첫 OpenSCAD 실행에서 `Current top level object is empty.` 또는 2D/3D 혼용 경고와 exit code 1을 발생시킵니다.
+- `CLIExecutionError`는 bounded stdout/stderr tail만 보유해야 합니다.
+- 다음 LLM 요청은 해당 Rule ID가 포함된 현재 attempt feedback만 받아야 합니다.
+- 검증: `test_orchestrator_runtime_refinement_rolls_back_and_persists_only_final_plan`
+
+### 시나리오 2: Failed attempt rollback → final artifact promotion
+
+- 첫 attempt가 workspace 파일을 작성한 뒤 CLI에서 실패하도록 합니다.
+- workspace와 artifact 저장소가 attempt 이전 상태로 복구되는지 확인합니다.
+- 두 번째 성공 attempt의 파일과 artifact만 남고 해당 plan만 DB에 저장되는지 확인합니다.
+- 검증: `test_orchestrator_runtime_refinement_rolls_back_and_persists_only_final_plan`
+
+### 시나리오 3: Retry exhaustion → bounded FAILED
+
+- 세 번의 실행 attempt를 모두 실패시킵니다.
+- Job은 `FAILED`로 전이하고 action plan은 저장되지 않아야 합니다.
+- 실패 이벤트는 bounded reason만 포함해야 합니다.
+- 검증: `test_runtime_retry_exhaustion_fails_with_bounded_reason`

@@ -123,3 +123,10 @@ docker compose exec app /usr/local/bin/openscad-headless -o /tmp/smoke.stl /tmp/
 ```
 
 MVP는 단일 replica만 지원한다. Compose scale 테스트는 요구사항 범위 밖이다.
+
+## R-15A/B/C 성능 검증 상태
+
+- stdout/stderr pipe deadlock 방지는 양쪽 스트림의 동시 다중 line 출력 자동화 테스트로 검증했습니다.
+- tail은 스트림별 최근 20개 line, line당 최대 500자, 예외 속성당 최대 4,000자로 제한됩니다.
+- diagnostics feedback은 최대 1,500자로 제한됩니다.
+- 실제 OpenSCAD 대용량 출력 및 컨테이너 부하 측정은 Docker CLI 부재로 N/A입니다.

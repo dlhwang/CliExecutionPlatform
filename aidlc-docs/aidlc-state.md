@@ -123,19 +123,33 @@
 
 - **R-15 Completion Note**: 2026-06-22T14:28:44+09:00 LLM system prompt 보강, `ScadStaticValidator` 구현, `LLMPlanRetryExecutor`에 `validation_cb` 연동 및 `LLMPlanValidationError` 에러 catch를 통한 refinement 루프 연동 완료. 총 69개 테스트 전원 통과.
 
-### HOTFIX R-15 (Refinement Feedback 보완 추가)
+### HOTFIX R-15A (정적 검증 및 bounded validation feedback)
 - [x] Workspace Detection (Completed: 2026-06-22T14:14:00+09:00)
 - [x] Requirements Analysis (Completed: 2026-06-22T14:19:00+09:00)
 - [x] Workflow Planning (Approved: 2026-06-22T14:23:00+09:00)
-- [x] Code Generation (Completed: 2026-06-22T14:44:00+09:00)
-- [x] Build and Test (Completed: 2026-06-22T14:44:00+09:00, 71 tests passed)
-- [x] Operations - PLACEHOLDER (Completed: 2026-06-22T14:45:00+09:00)
+- [x] Initial Code Generation (Completed: 2026-06-22T14:28:44+09:00)
+- [x] Contract Gap Remediation Plan Approval (Approved: 2026-06-22T16:31:53+09:00)
+- [x] Contract Gap Remediation Code Generation (Completed: 2026-06-22T16:50:42+09:00)
+- [x] Build and Test (Completed: 2026-06-22T16:58:39+09:00, 79 tests passed)
+- [x] Operations - PLACEHOLDER (Completed: 2026-06-22T17:00:05+09:00)
+
+### HOTFIX R-15B (CLI 런타임 출력 및 diagnostics)
+- [x] Requirements/Workflow Planning Revision (Completed: 2026-06-22T16:18:40+09:00)
+- [x] Code Generation Plan Approval (Approved: 2026-06-22T16:31:53+09:00)
+- [x] Code Generation (Completed: 2026-06-22T16:50:42+09:00)
+- [x] Build and Test (Completed: 2026-06-22T16:58:39+09:00, 79 tests passed)
+- [x] Operations - PLACEHOLDER (Completed: 2026-06-22T17:00:05+09:00)
+
+### HOTFIX R-15C (오케스트레이터 runtime refinement)
+- [x] Requirements/Workflow Planning Revision (Completed: 2026-06-22T16:18:40+09:00)
+- [x] Code Generation Plan Approval (Approved: 2026-06-22T16:31:53+09:00)
+- [x] Code Generation (Completed: 2026-06-22T16:50:42+09:00)
+- [x] Build and Test (Completed: 2026-06-22T16:58:39+09:00, 79 tests passed)
+- [x] Operations - PLACEHOLDER (Completed: 2026-06-22T17:00:05+09:00)
 
 ## Current Status
-- **Lifecycle Phase**: OPERATIONS
-- **Current Stage**: Operations - PLACEHOLDER
-- **Next Stage**: None (R-15 Cycle Completed)
+- **Lifecycle Phase**: COMPLETE
+- **Current Stage**: R-15A/B/C Lifecycle Complete
+- **Next Stage**: 운영 환경 Docker/OpenSCAD acceptance smoke
 
-
-
-
+- **R-15A/B/C Completion Note**: 2026-06-22T17:00:05+09:00 전체 79개 테스트와 Python compileall이 통과했습니다. Docker CLI 부재로 실제 container acceptance smoke는 N/A이며 운영 배포 전 조건으로 남습니다.

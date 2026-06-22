@@ -158,3 +158,18 @@ docker compose down
 
 `docker compose down -v`는 `postgres_data`와 `workspace_data`의 데이터(Job 및 artifact 등)를 모두 영구 삭제하므로 신중히 사용해야 합니다.
 
+---
+
+## R-15A/B/C 빌드 검증
+
+```powershell
+.\venv\Scripts\python.exe -m compileall -q llm runner orchestrator storage tests
+.\venv\Scripts\python.exe -m pytest tests -q --basetemp=.test-tmp\r15-build-test
+```
+
+성공 기준:
+
+- Python compileall exit code 0
+- 전체 79개 테스트 통과, 실패 0개
+- `runner/diagnostics.py` import 성공
+- 실제 Docker/OpenSCAD smoke는 Docker CLI가 있는 Linux/WSL2 환경에서 별도 실행

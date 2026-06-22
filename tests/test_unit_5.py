@@ -27,7 +27,8 @@ from orchestrator.concurrency import (
 from orchestrator.config import OrchestratorConfig, OrchestratorConfigurationError
 from orchestrator.recovery import StaleJobRecoveryService
 from orchestrator.repository import OrchestratorRepository
-from orchestrator.service import JobOrchestratorService
+from orchestrator.service import ALLOWED_ACTIONS, JobOrchestratorService
+from runner.exceptions import CLIExecutionError
 from conftest import TestingSessionLocal
 
 
@@ -232,7 +233,7 @@ def test_action_failure_preserves_partial_workspace(db_session, test_storage):
         ActionExecutor(test_storage, FakeRunner(), TestingSessionLocal), OrchestrationConcurrencyGate(),
     )
     assert not asyncio.run(service.run(job.id))
-    assert test_storage.read_file(job.id, "partial.txt") == b"keep"
+    assert not test_storage.workspace_file_exists(job.id, "partial.txt")
     db_session.expire_all()
     assert db_session.get(Job, job.id).status == "FAILED"
 
@@ -453,3 +454,134 @@ def test_orchestrator_refines_when_scad_static_validation_fails(db_session, test
     assert completed_job.status == "COMPLETED"
     assert test_storage.read_file(job.id, "model.scad").decode("utf-8") == good_scad_content
 
+
+def test_orchestrator_runtime_refinement_rolls_back_and_persists_only_final_plan(db_session, test_storage):
+    import json
+
+    job = JobService(db_session, test_storage).create_job("runtime refinement")
+    first_content = "failed attempt"
+    final_content = "successful attempt"
+    first_plan = json.dumps([
+        {"action": "WRITE_FILE", "path": "output.stl", "content": first_content},
+        {"action": "CREATE_ARTIFACT", "path": "output.stl"},
+        {"action": "RUN_TOOL", "tool_name": "openscad", "args": ["model.scad"]},
+    ])
+    final_plan = json.dumps([
+        {"action": "WRITE_FILE", "path": "output.stl", "content": final_content},
+        {"action": "RUN_TOOL", "tool_name": "openscad", "args": ["model.scad"]},
+        {"action": "CREATE_ARTIFACT", "path": "output.stl"},
+    ])
+
+    order = []
+
+    class RecordingRepository(OrchestratorRepository):
+        def save_action_plan(self, job_id, actions):
+            order.append("persist")
+            return super().save_action_plan(job_id, actions)
+
+        def transition(self, job_id, expected_statuses, target_status, event_code, message):
+            if target_status == "COMPLETED":
+                order.append("completed")
+            return super().transition(job_id, expected_statuses, target_status, event_code, message)
+
+    class FailOnceRunner:
+        def __init__(self):
+            self.calls = 0
+
+        async def run_tool(self, job_id, tool_name, args, db, timeout_seconds=30.0):
+            self.calls += 1
+            if self.calls == 1:
+                assert not test_storage.check_artifact_exists(job_id, "output.stl")
+                raise CLIExecutionError(
+                    "OpenSCAD failed.", 1,
+                    stderr="Current top level object is empty.",
+                )
+            order.append("execution_success")
+            return 0
+
+    llm_client = FakeLLMClient([first_plan, final_plan])
+    service = JobOrchestratorService(
+        RecordingRepository(TestingSessionLocal), TestingSessionLocal, test_storage,
+        llm_client, ActionPlanParser(), SecurityPolicyValidator(test_storage.base_dir),
+        ActionExecutor(test_storage, FailOnceRunner(), TestingSessionLocal),
+        OrchestrationConcurrencyGate(),
+    )
+
+    assert asyncio.run(service.run(job.id)) is True
+    assert "[SCAD_EMPTY_TOP_LEVEL]" in llm_client.requests[1].retry_feedback
+    assert first_content not in llm_client.requests[1].retry_feedback
+    assert test_storage.read_file(job.id, "output.stl") == final_content.encode()
+    assert test_storage.get_artifact_path(job.id, "output.stl").read_bytes() == final_content.encode()
+
+    db_session.expire_all()
+    completed = db_session.get(Job, job.id)
+    assert completed.status == "COMPLETED"
+    assert completed.action_plan == json.loads(final_plan)
+    assert order.index("execution_success") < order.index("persist") < order.index("completed")
+
+
+def test_runtime_retry_feedback_contains_only_current_attempt(db_session, test_storage):
+    job = JobService(db_session, test_storage).create_job("three attempts")
+    plan = '[{"action":"RUN_TOOL","tool_name":"openscad","args":["model.scad"]}]'
+
+    class FailTwiceRunner:
+        def __init__(self):
+            self.calls = 0
+
+        async def run_tool(self, job_id, tool_name, args, db, timeout_seconds=30.0):
+            self.calls += 1
+            if self.calls <= 2:
+                raise CLIExecutionError("failed", 1, stderr=f"attempt-marker-{self.calls}")
+            return 0
+
+    llm_client = FakeLLMClient([plan, plan, plan])
+    service = JobOrchestratorService(
+        OrchestratorRepository(TestingSessionLocal), TestingSessionLocal, test_storage,
+        llm_client, ActionPlanParser(), SecurityPolicyValidator(test_storage.base_dir),
+        ActionExecutor(test_storage, FailTwiceRunner(), TestingSessionLocal),
+        OrchestrationConcurrencyGate(),
+    )
+
+    assert asyncio.run(service.run(job.id)) is True
+    assert "attempt-marker-1" in llm_client.requests[1].retry_feedback
+    assert "attempt-marker-2" in llm_client.requests[2].retry_feedback
+    assert "attempt-marker-1" not in llm_client.requests[2].retry_feedback
+
+
+def test_runtime_retry_exhaustion_fails_with_bounded_reason(db_session, test_storage):
+    job = JobService(db_session, test_storage).create_job("exhaust attempts")
+    plan = '[{"action":"RUN_TOOL","tool_name":"openscad","args":["model.scad"]}]'
+
+    class AlwaysFailRunner:
+        async def run_tool(self, job_id, tool_name, args, db, timeout_seconds=30.0):
+            raise CLIExecutionError("failed", 1, stderr="x" * 10000)
+
+    service = JobOrchestratorService(
+        OrchestratorRepository(TestingSessionLocal), TestingSessionLocal, test_storage,
+        FakeLLMClient([plan, plan, plan]), ActionPlanParser(),
+        SecurityPolicyValidator(test_storage.base_dir),
+        ActionExecutor(test_storage, AlwaysFailRunner(), TestingSessionLocal),
+        OrchestrationConcurrencyGate(),
+    )
+
+    assert asyncio.run(service.run(job.id)) is False
+    db_session.expire_all()
+    failed = db_session.get(Job, job.id)
+    assert failed.status == "FAILED"
+    failure_event = db_session.query(EventLog).filter(
+        EventLog.job_id == job.id,
+        EventLog.message.contains("ORCHESTRATION_FAILED"),
+    ).one()
+    assert len(failure_event.message) < 5000
+    assert failed.action_plan is None
+
+
+def test_runtime_refinement_boundary_excludes_non_idempotent_external_actions():
+    assert ALLOWED_ACTIONS == (
+        "CREATE_DIRECTORY",
+        "WRITE_FILE",
+        "RUN_TOOL",
+        "CREATE_ARTIFACT",
+    )
+    assert "HTTP_REQUEST" not in ALLOWED_ACTIONS
+    assert "SEND_MESSAGE" not in ALLOWED_ACTIONS

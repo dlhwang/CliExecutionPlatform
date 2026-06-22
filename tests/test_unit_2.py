@@ -312,6 +312,40 @@ def test_scad_static_validation_ignores_comment_only_forbidden_patterns():
     ScadStaticValidator.validate(content)
 
 
+def test_scad_static_validation_ignores_syntax_patterns_in_double_quoted_strings():
+    from llm.scad_validator import ScadStaticValidator
+
+    content = '''
+    cube([10, 20, 30]);
+    echo("point.x and 180 / PI and PI / 180 and Here is");
+    text("escaped quote: \\" vector.y");
+    '''
+    ScadStaticValidator.validate(content)
+
+
+def test_scad_static_validation_preserves_original_line_numbers_after_masking():
+    from llm.scad_validator import ScadStaticValidator, strip_comments
+
+    content = '''// vector.x
+/* 180 / PI
+   vector.y */
+echo("vector.z and PI / 180");
+cube([1, 1, 1]);
+value = point.x;'''
+
+    assert len(strip_comments(content)) == len(content)
+    assert strip_comments(content).count("\n") == content.count("\n")
+
+    with pytest.raises(LLMPlanValidationError) as exc_info:
+        ScadStaticValidator.validate(content)
+
+    message = exc_info.value.message
+    assert "[SCAD_VECTOR_PROPERTY_ACCESS]" in message
+    assert "Line 6: value = point.x;" in message
+    assert "Line 1:" not in message
+    assert content not in message
+
+
 def test_scad_validation_feedback_does_not_include_full_content():
     from llm.scad_validator import ScadStaticValidator
 
@@ -395,5 +429,3 @@ def test_scad_validation_feedback_is_bounded():
     
     # 4. snippet 150자 초과 시 truncate 되어 '...'이 붙어 있어야 한다.
     assert "..." in msg
-
-

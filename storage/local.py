@@ -1,4 +1,5 @@
 import shutil
+import uuid
 from pathlib import Path
 from uuid import UUID
 from storage.interface import StorageService
@@ -118,3 +119,51 @@ class LocalStorageService(StorageService):
         if not target_path.exists() or not target_path.is_file():
             raise FileNotFoundError(f"Artifact not found: {filename} for job {job_id}")
         return target_path
+
+    @staticmethod
+    def _copy_tree_with_copyfile(source: Path, target: Path) -> None:
+        target.mkdir(parents=True, exist_ok=True)
+        if not source.exists():
+            return
+        for path in source.rglob("*"):
+            relative = path.relative_to(source)
+            destination = target / relative
+            if path.is_dir():
+                destination.mkdir(parents=True, exist_ok=True)
+            elif path.is_file():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, destination)
+
+    def _attempt_path(self, job_id: UUID, token: str) -> Path:
+        snapshots_root = (self.base_dir / ".attempt-snapshots" / str(job_id)).resolve()
+        snapshot = (snapshots_root / token).resolve()
+        if not snapshot.is_relative_to(snapshots_root):
+            raise PermissionError("Access Denied: Invalid attempt snapshot token.")
+        return snapshot
+
+    def begin_attempt(self, job_id: UUID) -> str:
+        token = str(uuid.uuid4())
+        snapshot = self._attempt_path(job_id, token)
+        self._copy_tree_with_copyfile(
+            self.base_dir / "jobs" / str(job_id), snapshot / "jobs"
+        )
+        self._copy_tree_with_copyfile(
+            self.base_dir / "artifacts" / str(job_id), snapshot / "artifacts"
+        )
+        return token
+
+    def rollback_attempt(self, job_id: UUID, token: str) -> None:
+        snapshot = self._attempt_path(job_id, token)
+        if not snapshot.is_dir():
+            raise FileNotFoundError(f"Attempt snapshot not found: {token}")
+        for dir_type in ("jobs", "artifacts"):
+            destination = self.base_dir / dir_type / str(job_id)
+            if destination.exists():
+                shutil.rmtree(destination)
+            self._copy_tree_with_copyfile(snapshot / dir_type, destination)
+        self.complete_attempt(job_id, token)
+
+    def complete_attempt(self, job_id: UUID, token: str) -> None:
+        snapshot = self._attempt_path(job_id, token)
+        if snapshot.exists():
+            shutil.rmtree(snapshot)

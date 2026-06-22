@@ -147,6 +147,46 @@ docker compose ps
 
 ---
 
+# R-15A/B/C Build and Test Summary
+
+## 실행 정보
+
+- **실행 시각**: 2026-06-22T16:54:57+09:00
+- **Python compileall**: Pass
+- **전체 테스트**: 79 passed, 0 failed
+- **Docker/OpenSCAD smoke**: N/A - 현재 환경에 Docker CLI가 없음
+
+## 요구사항 검증 매핑
+
+| 요구사항 | 계약 | 자동화 증거 | 결과 |
+| --- | --- | --- | --- |
+| R-15A | comment/string masking 및 원본 line number | `test_scad_static_validation_ignores_syntax_patterns_in_double_quoted_strings`, `test_scad_static_validation_preserves_original_line_numbers_after_masking` | Pass |
+| R-15A | bounded summary/snippet, 전체 SCAD 비포함 | `test_scad_validation_feedback_does_not_include_full_content`, `test_scad_validation_feedback_is_bounded` | Pass |
+| R-15B | stdout/stderr concurrent drain 및 모든 line EventLog 저장 | `test_nonzero_exit_captures_bounded_stdout_stderr_and_persists_lines` | Pass |
+| R-15B | bounded exception 및 OpenSCAD Rule ID diagnostics | `test_openscad_diagnostics_are_bounded_and_classify_known_messages` | Pass |
+| R-15C | parse → validation → execution refinement 단일 소유 | `test_orchestrator_runtime_refinement_rolls_back_and_persists_only_final_plan` | Pass |
+| R-15C | 현재 attempt feedback만 전달 | `test_runtime_retry_feedback_contains_only_current_attempt` | Pass |
+| R-15C | 실패 rollback, artifact 비승격, 최종 plan만 저장 | `test_orchestrator_runtime_refinement_rolls_back_and_persists_only_final_plan` | Pass |
+| R-15C | non-idempotent external side effect 제외 | `test_runtime_refinement_boundary_excludes_non_idempotent_external_actions` | Pass |
+| R-15C | retry 소진 시 bounded FAILED | `test_runtime_retry_exhaustion_fails_with_bounded_reason` | Pass |
+| 전체 회귀 | 기존 API, SSE, storage, validator, runner, orchestrator | 전체 `tests/` 79개 | Pass |
+| Container acceptance | 실제 OpenSCAD STL/PNG 및 Docker pipe 동작 | Docker smoke | N/A - Docker CLI 부재 |
+
+## 경고와 N/A
+
+- Starlette/httpx deprecation warning 1건과 기존 asyncio event-loop deprecation warning 1건은 테스트 실패에 영향을 주지 않습니다.
+- pytest cache 디렉터리 권한 warning은 `--basetemp`로 테스트 임시 경로를 workspace 내부에 지정하여 우회했습니다.
+- 실제 container acceptance는 Linux/WSL2 Docker 환경에서 후속 수행해야 합니다.
+
+## 전체 상태
+
+- **Build**: Pass
+- **Unit/Integration/Regression Tests**: Pass (79/79)
+- **Requirement Verification**: Complete, container acceptance N/A 사유 기록
+- **Operations 준비**: Conditional - Docker/OpenSCAD smoke 전까지 운영 배포 준비는 조건부
+
+---
+
 # R-15 Build and Test Summary (Refinement Feedback 보완 추가 포함)
 
 ## 실행 정보
@@ -176,5 +216,4 @@ docker compose ps
 - **코드 회귀 및 정적 요구사항 검증**: Complete (71/71 tests passed)
 - **실제 container acceptance 검증**: Incomplete (Docker 미설치 환경)
 - **운영 배포 준비**: Conditional - Docker 환경에서 build 및 STL/PNG smoke 통과 필요
-
 

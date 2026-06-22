@@ -2,10 +2,10 @@ import re
 from llm.parser import LLMPlanValidationError
 
 
-def strip_comments(content: str) -> str:
+def _mask_non_code(content: str, *, mask_strings: bool) -> str:
     """
-    OpenSCAD 주석(// 및 /* */)을 제거하는 경량 상태 머신입니다.
-    double-quoted string 내부의 주석형 문자(예: "http://...")나 이스케이프 문자(\")는 문자열로 취급하여 보호합니다.
+    주석과 선택적으로 double-quoted string을 공백으로 masking합니다.
+    모든 newline과 문자 위치를 보존하므로 결과의 line/column이 원본과 일치합니다.
     """
     result = []
     i = 0
@@ -17,38 +17,50 @@ def strip_comments(content: str) -> str:
         if state == "normal":
             if char == '"':
                 state = "in_string"
-                result.append(char)
+                result.append(" " if mask_strings else char)
             elif char == "/" and i + 1 < n and content[i + 1] == "/":
                 state = "in_line_comment"
-                i += 1  # '/' skip
+                result.extend((" ", " "))
+                i += 1
             elif char == "/" and i + 1 < n and content[i + 1] == "*":
                 state = "in_block_comment"
-                i += 1  # '*' skip
+                result.extend((" ", " "))
+                i += 1
             else:
                 result.append(char)
         elif state == "in_string":
             if char == '"':
                 # check for backslash escapes before the quote
                 backslash_count = 0
-                k = len(result) - 1
-                while k >= 0 and result[k] == "\\":
+                k = i - 1
+                while k >= 0 and content[k] == "\\":
                     backslash_count += 1
                     k -= 1
                 if backslash_count % 2 == 0:
                     state = "normal"
-            result.append(char)
+            result.append(" " if mask_strings else char)
         elif state == "in_line_comment":
             if char == "\n":
                 state = "normal"
                 result.append(char)  # 개행을 보존하여 라인 기반 분석의 깨짐 방지
+            else:
+                result.append(" ")
         elif state == "in_block_comment":
             if char == "*" and i + 1 < n and content[i + 1] == "/":
                 state = "normal"
-                i += 1  # '/' skip
+                result.extend((" ", " "))
+                i += 1
             elif char == "\n":
                 result.append(char)  # block comment 내부의 개행도 보존하여 라인 매핑 유지
+            else:
+                result.append(" ")
         i += 1
     return "".join(result)
+
+
+def strip_comments(content: str) -> str:
+    """호환용 API: 주석만 masking하고 string literal은 보존합니다."""
+    return _mask_non_code(content, mask_strings=False)
 
 
 class ScadStaticValidator:
@@ -63,8 +75,8 @@ class ScadStaticValidator:
             )
 
         orig_lines = content.splitlines()
-        stripped = strip_comments(content)
-        stripped_lines = stripped.splitlines()
+        syntax_masked = _mask_non_code(content, mask_strings=True)
+        stripped_lines = syntax_masked.splitlines()
 
         # 라인 수 차이가 생기지 않도록 방어적 패딩 처리
         num_lines = max(len(orig_lines), len(stripped_lines))
@@ -164,7 +176,7 @@ class ScadStaticValidator:
         ]
         has_keyword = False
         for kw in keywords:
-            if re.search(r"\b" + re.escape(kw) + r"\b", stripped):
+            if re.search(r"\b" + re.escape(kw) + r"\b", syntax_masked):
                 has_keyword = True
                 break
         if not has_keyword:
@@ -206,4 +218,3 @@ class ScadStaticValidator:
                 status_code=400,
                 error_code="VALIDATION_ERROR",
             )
-

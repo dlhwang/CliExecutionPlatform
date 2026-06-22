@@ -79,3 +79,18 @@ class StorageService(ABC):
         - 상위 경로 침투 검증 필수
         """
         pass
+
+    @abstractmethod
+    def begin_attempt(self, job_id: UUID) -> str:
+        """Snapshot workspace and artifacts before a retryable execution attempt."""
+        pass
+
+    @abstractmethod
+    def rollback_attempt(self, job_id: UUID, token: str) -> None:
+        """Restore workspace and artifacts to the state captured by begin_attempt."""
+        pass
+
+    @abstractmethod
+    def complete_attempt(self, job_id: UUID, token: str) -> None:
+        """Discard a successful attempt snapshot."""
+        pass

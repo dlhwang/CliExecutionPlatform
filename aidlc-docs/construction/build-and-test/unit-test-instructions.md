@@ -132,7 +132,7 @@ pytest tests/test_unit_3.py::test_timeout_kills_process -v
 | `test_endpoint_security_and_secret_validation` | NFR-5-9, NFR-5-10 | 프로덕션 환경의 LLM Endpoint가 HTTPS가 아니거나 Secret이 없을 때 설정 오류 검증 |
 | `test_redirect_and_response_size_are_rejected` | NFR-5-11, NFR-5-4 | LLM 응답 수신 시 redirect 거부 및 5MB 초과 시 response size 제한 에러 검증 |
 | `test_llm_client_uses_120_second_timeout` | NFR-5-1 | HTTP LLMClient의 타임아웃이 120초로 적용되어 동작하는지 검증 |
-| `test_action_failure_preserves_partial_workspace` | BR-5-10 | 액션 수행 중 중간 실패 시 이미 작성된 파일 workspace에 보존 및 FAILED 상태 전이 검증 |
+| `test_action_failure_preserves_partial_workspace` | R-15C | 액션 수행 중 실패 시 attempt workspace 변경 rollback 및 FAILED 상태 전이 검증 |
 | `test_stale_running_jobs_recovered_at_startup` | NFR-5-7 | lifespan 기동 시 15분 초과 stale RUNNING Job을 FAILED 상태로 자동 복구하고 감사 로그 적재 검증 |
 
 ---
@@ -187,3 +187,29 @@ R-14 직접 검증 테스트:
 - Starlette/httpx deprecation warning
 - 기존 timeout mock에서 생성된 coroutine의 unawaited warning
 - 실패에는 영향을 주지 않지만 후속 테스트 정리 대상으로 기록한다.
+
+---
+
+## R-15A/B/C 활성 단위 테스트 결과
+
+실행 명령:
+
+```powershell
+.\venv\Scripts\python.exe -m pytest tests -q --basetemp=.test-tmp\r15-build-test
+```
+
+| 영역 | 테스트 파일 | 테스트 수 | 결과 |
+| --- | --- | ---: | --- |
+| Unit 1 | `tests/test_unit_1.py` | 4 | Pass |
+| R-15A / Unit 2 | `tests/test_unit_2.py` | 19 | Pass |
+| R-15B / Unit 3 | `tests/test_unit_3.py` | 14 | Pass |
+| Unit 4 | `tests/test_unit_4.py` | 16 | Pass |
+| R-15C / Unit 5 | `tests/test_unit_5.py` | 21 | Pass |
+| Deployment | `tests/test_deployment.py` | 5 | Pass |
+| 합계 | | 79 | 79 passed |
+
+직접 검증 근거:
+
+- R-15A: comment/string masking false-positive 방지, 원본 line number, bounded feedback 테스트
+- R-15B: concurrent stdout/stderr drain, 모든 line EventLog 저장, bounded tail 및 Rule ID diagnostics 테스트
+- R-15C: current-attempt-only feedback, 실패 rollback, artifact 비승격, 최종 plan 저장 순서 및 exhausted retry 테스트

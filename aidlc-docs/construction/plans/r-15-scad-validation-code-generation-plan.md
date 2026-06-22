@@ -1,6 +1,6 @@
-# Code Generation Plan - Hotfix R-15 (OpenSCAD 코드 생성 제약 강화 및 SCAD 정적 검증기 추가)
+# Code Generation Plan - Hotfix R-15A (정적 검증 및 bounded validation feedback)
 
-본 계획서는 R-15 핫픽스의 요구사항 구현을 순차적으로 진행하기 위한 상세 코드 생성 계획입니다. 이 문서가 코드 생성 과정의 단일 진실 공급원(Single Source of Truth)으로 사용됩니다.
+본 계획서는 R-15A의 완료된 정적 검증 범위를 기록하는 단일 진실 공급원(Single Source of Truth)입니다. CLI 런타임 출력·진단은 R-15B, 오케스트레이터 실행 흐름 변경은 R-15C에서 별도로 다룹니다.
 
 ## 1. Unit Context & Details
 
@@ -87,12 +87,37 @@
     - `.\venv\Scripts\python -m pytest tests/ -v`
   - 확인 사항: 모든 신규/기존 테스트가 성공적으로 동작하는지 검증.
 
+- [x] **Step A11: 원본 위치 보존 comment/string masking 보완**
+  - 파일 경로: [llm/scad_validator.py](file:///d:/workspace/CLI-Execution-Platform/llm/scad_validator.py) [MODIFY]
+  - 구현 내용:
+    - 주석을 삭제하지 않고 newline과 문자 위치를 보존하는 공백 masking으로 변경한다.
+    - syntax-like 규칙 전용 분석 view에서는 double-quoted string literal도 공백으로 masking하되 newline과 원본 line number를 유지한다.
+    - escaped quote와 문자열 내부의 `//`, `/* */`를 올바르게 처리한다.
+    - Markdown fence 등 raw-content 규칙, syntax-like 규칙, 구조 키워드 규칙이 각각 적절한 분석 view를 사용하도록 rule matrix를 명시한다.
+
+- [x] **Step A12: false-positive 및 bounded feedback 테스트 보완**
+  - 파일 경로: [tests/test_unit_2.py](file:///d:/workspace/CLI-Execution-Platform/tests/test_unit_2.py) [MODIFY]
+  - 구현 내용:
+    - 주석 및 double-quoted string 내부의 `point.x`, `180/PI`, `PI/180`이 위반으로 검출되지 않는지 검증한다.
+    - 동일 패턴이 실행 코드에 있으면 원본 line number로 검출되는지 검증한다.
+    - feedback이 bounded rule summary와 대표 원본 line snippet만 포함하고 전체 SCAD content는 포함하지 않는지 검증한다.
+
+- [x] **Step A13: R-15A 보완 회귀 테스트 및 결과 기록**
+  - `.\venv\Scripts\python -m pytest tests/test_unit_2.py -v`
+  - `.\venv\Scripts\python -m pytest tests/ -v`
+
 ---
 
 ## 3. Story / Requirement Mappings
 
-- **Requirement R-15**:
+- **Requirement R-15A**:
   - `llm/scad_validator.py`, `llm/client.py`, `llm/retry.py`, `llm/validator.py`, `orchestrator/service.py` 코드 보완을 통해 단일화된 검증기 구축 및 refinement loop 연동.
   - `tests/test_unit_2.py`, `tests/test_unit_5.py`에 유닛 및 통합 검증용 테스트 추가하여 Requirements 추적성 충족.
   - [보완] 토큰 폭발 방지를 위해 검증 피드백 길이 제한(1,500자) 및 위반 라인 snippet화(최대 2개, 150자 제한), 이전 피드백 누적 방지 기법 적용.
   - [보완] `shutil.copy2(...)` 사용을 제거하고 산출물 복사는 `shutil.copyfile(...)`로 전격 교체 (`storage/local.py`, `runner/service.py`).
+  - [보완] syntax-like 규칙은 원본 line number를 보존하는 comment/string-masked 분석 view에서만 실행하고, bounded summary와 대표 snippet만 feedback에 포함한다.
+
+## 4. 후속 변경 경계
+
+- **R-15B**: `CLIExecutionError` stdout/stderr 수집 및 OpenSCAD 런타임 diagnostics
+- **R-15C**: 오케스트레이터 실행 흐름 단일화, runtime refinement, 최종 plan 저장 시점 변경

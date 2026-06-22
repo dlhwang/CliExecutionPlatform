@@ -32,6 +32,7 @@ from runner.exceptions import (
     CLIExecutionTimeoutError,
 )
 from runner.service import CLIExecutionRunner, _CLI_SEMAPHORE
+from runner.diagnostics import build_runtime_feedback
 from runner.validator import ArgumentValidator
 
 
@@ -337,6 +338,57 @@ def test_nonzero_exit_code_raises_cli_execution_error(db_session, tmp_path):
         assert "exit code 1" in err.message.lower() or "1" in err.message
 
     asyncio.get_event_loop().run_until_complete(run_test())
+
+
+def test_nonzero_exit_captures_bounded_stdout_stderr_and_persists_lines(db_session, tmp_path):
+    job_id = _create_job(db_session)
+    runner, _ = _make_runner(tmp_path, job_id)
+
+    code = (
+        "import sys;"
+        "[print(f'out-{i}') for i in range(30)];"
+        "[print(f'err-{i}', file=sys.stderr) for i in range(30)];"
+        "sys.exit(1)"
+    )
+
+    async def run_test():
+        with patch.object(runner, "_openscad_bin", _get_python_cmd()):
+            with patch("runner.service.ArgumentValidator.validate"):
+                with pytest.raises(CLIExecutionError) as exc_info:
+                    await runner.run_tool(job_id, "openscad", ["-c", code], db_session)
+        return exc_info.value
+
+    error = asyncio.get_event_loop().run_until_complete(run_test())
+    assert "out-29" in error.stdout and "out-0" not in error.stdout
+    assert "err-29" in error.stderr and "err-0" not in error.stderr
+    assert "out-29" in str(error) and "err-29" in str(error)
+    messages = [
+        row.message
+        for row in db_session.query(EventLog).filter_by(job_id=job_id, event_type="CLI_OUTPUT")
+    ]
+    assert "out-0" in messages and "out-29" in messages
+    assert "err-0" in messages and "err-29" in messages
+
+
+def test_openscad_diagnostics_are_bounded_and_classify_known_messages():
+    secret_outside_tail = "FULL_SCAD_SENTINEL"
+    error = CLIExecutionError(
+        "failed",
+        1,
+        stdout="ordinary output",
+        stderr=(
+            "WARNING: Ignoring 3D child object for 2D operation in file die.scad, line 49\n"
+            "Current top level object is empty."
+        ),
+    )
+
+    feedback = build_runtime_feedback(error)
+    assert "[SCAD_EMPTY_TOP_LEVEL]" in feedback
+    assert "[SCAD_2D_3D_MIXED_OPERATION]" in feedback
+    assert len(feedback) <= 1500
+    assert secret_outside_tail not in feedback
+    assert "Traceback (most recent call last)" not in feedback
+    assert '"action":"WRITE_FILE"' not in feedback
 
 
 def test_run_tool_uses_job_workspace_as_cwd(db_session, tmp_path):

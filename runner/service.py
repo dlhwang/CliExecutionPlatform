@@ -18,6 +18,8 @@ import shutil
 import sys
 import tempfile
 import uuid
+from collections import deque
+from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -46,6 +48,8 @@ _JITTER_MAX: float = 0.5
 
 # 스트림 수집 청크 크기 (Q2: 4KB)
 _CHUNK_SIZE: int = 4096
+_TAIL_MAX_LINES: int = 20
+_TAIL_MAX_LINE_CHARS: int = 500
 
 # 기본 타임아웃 (NFR-1.1)
 _DEFAULT_TIMEOUT_SECONDS: float = 30.0
@@ -230,12 +234,16 @@ class CLIExecutionRunner:
             )
 
             # Step 4: 타임아웃 데드라인 + 스트림 수집 (NFR-1.1 + Q2)
+            stream_task = asyncio.create_task(self._collect_streams(process, job_id, db))
             try:
-                await asyncio.wait_for(
-                    self._collect_streams(process, job_id, db),
+                captured_streams = await asyncio.wait_for(
+                    stream_task,
                     timeout=timeout_seconds,
                 )
             except asyncio.TimeoutError:
+                stream_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await stream_task
                 # 타임아웃: 프로세스 강제 종료 (SIGKILL)
                 try:
                     process.kill()
@@ -256,12 +264,19 @@ class CLIExecutionRunner:
                     timeout_limit=timeout_seconds,
                 )
 
+            if isinstance(captured_streams, tuple) and len(captured_streams) == 2:
+                stdout_tail, stderr_tail = captured_streams
+            else:
+                stdout_tail, stderr_tail = "", ""
+
             # Step 5: Exit Code 검사
             exit_code = process.returncode
             if exit_code != 0:
                 raise CLIExecutionError(
                     message=f"OpenSCAD tool execution failed with exit code {exit_code}.",
                     exit_code=exit_code,
+                    stdout=stdout_tail,
+                    stderr=stderr_tail,
                 )
 
             # 5. 실행 전/후 snapshot 비교를 통해 새로 생성되거나 변경된 파일만 workspace에 반영 (AC 5, AC 6)
@@ -345,7 +360,7 @@ class CLIExecutionRunner:
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT,  # stdout + stderr 병합
+                    stderr=asyncio.subprocess.PIPE,
                     cwd=cwd,
                     # shell=False는 asyncio.create_subprocess_exec의 기본값 (NFR-1.4)
                 )
@@ -371,59 +386,60 @@ class CLIExecutionRunner:
         process: asyncio.subprocess.Process,
         job_id: uuid.UUID,
         db: Session,
-    ) -> None:
+    ) -> tuple[str, str]:
         """
-        프로세스 stdout(stderr 병합)을 4KB 청크 단위로 수집하여 EventLog에 INSERT합니다.
+        프로세스 stdout/stderr를 동시에 4KB 청크 단위로 수집하여 EventLog에 INSERT합니다.
         (Q2: Chunked Buffer Accumulation Pattern)
 
         - 4KB 청크 단위로 읽어 줄(line) 단위로 분할합니다.
         - 청크 경계에서 잘린 부분 줄(partial line)은 line_buffer에 유지합니다.
         - 각 청크 완성 시 DB에 일괄 INSERT합니다.
         """
-        line_buffer: bytes = b""
+        async def drain(stream) -> str:
+            if stream is None:
+                return ""
+            line_buffer: bytes = b""
+            tail: deque[str] = deque(maxlen=_TAIL_MAX_LINES)
 
-        assert process.stdout is not None, "stdout pipe was not configured"
-
-        while True:
-            chunk = await process.stdout.read(_CHUNK_SIZE)
-            if not chunk:
-                break
-
-            line_buffer += chunk
-            # 줄 단위 분할
-            raw_lines = line_buffer.split(b"\n")
-            line_buffer = raw_lines[-1]  # 마지막 미완성 줄 보존
-            complete_lines = raw_lines[:-1]
-
-            if complete_lines:
+            def persist(lines: list[str]) -> None:
                 records = [
-                    EventLog(
-                        job_id=job_id,
-                        event_type="CLI_OUTPUT",
-                        message=line.decode("utf-8", errors="replace").rstrip("\r"),
-                    )
-                    for line in complete_lines
-                    if line  # 빈 줄 제외
+                    EventLog(job_id=job_id, event_type="CLI_OUTPUT", message=line)
+                    for line in lines
+                    if line
                 ]
                 if records:
                     db.add_all(records)
                     db.commit()
+                for line in lines:
+                    if line:
+                        tail.append(
+                            line
+                            if len(line) <= _TAIL_MAX_LINE_CHARS
+                            else line[:_TAIL_MAX_LINE_CHARS] + "..."
+                        )
 
-        # 루프 종료 후 잔여 버퍼 처리 (마지막 줄이 개행 없이 끝난 경우)
-        if line_buffer:
-            remainder = line_buffer.decode("utf-8", errors="replace").rstrip("\r")
-            if remainder:
-                db.add(
-                    EventLog(
-                        job_id=job_id,
-                        event_type="CLI_OUTPUT",
-                        message=remainder,
-                    )
-                )
-                db.commit()
+            while True:
+                chunk = await stream.read(_CHUNK_SIZE)
+                if not chunk:
+                    break
+                line_buffer += chunk
+                raw_lines = line_buffer.split(b"\n")
+                line_buffer = raw_lines[-1]
+                persist([
+                    line.decode("utf-8", errors="replace").rstrip("\r")
+                    for line in raw_lines[:-1]
+                ])
 
-        # 프로세스 종료 대기
+            if line_buffer:
+                persist([line_buffer.decode("utf-8", errors="replace").rstrip("\r")])
+            return "\n".join(tail)
+
+        stdout_tail, stderr_tail = await asyncio.gather(
+            drain(process.stdout),
+            drain(process.stderr),
+        )
         await process.wait()
+        return stdout_tail, stderr_tail
 
     def _write_system_marker(
         self,
