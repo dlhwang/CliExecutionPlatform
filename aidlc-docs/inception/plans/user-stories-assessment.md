@@ -25,3 +25,28 @@
 - 사용자 중심의 유즈케이스 시나리오 확립 (자연어 요청 -> 대기/SSE 구독 -> 실시간 로깅 -> 다운로드)
 - Last-Event-ID 복구 기능에 대한 테스트 가능한 인수 기준(Given/When/Then) 수립
 - 개발 단계에서 각 컴포넌트별로 추적 가능한 Verification Expectations 마련
+
+---
+
+## R-16 Artifact ID 기반 보안 다운로드 평가
+
+### Request Analysis
+- **Original Request**: 클라이언트가 경로나 파일명을 제공하지 않고 `artifact_id`만으로 안전하게 결과물을 다운로드하는 API를 추가한다.
+- **User Impact**: Direct - 외부 클라이언트와 사용자가 다운로드 API 계약 및 오류 응답을 직접 소비한다.
+- **Complexity Level**: Medium - 등록·다운로드의 이중 경로 검증, 403/404 경계, 응답 헤더 계약이 포함된다.
+- **Stakeholders**: API 클라이언트 개발자, 최종 사용자, 플랫폼 운영자
+
+### Assessment Criteria Met
+- [x] **High Priority**: 고객 노출 API와 신규 사용자 기능
+- [x] **Medium Priority**: 보안 강화와 데이터 모델 변경
+- [x] **Benefits**: 등록 경계와 다운로드 경계를 사용자 관점의 검증 가능한 시나리오로 분리하고 API 오류 계약을 명확히 한다.
+
+### Decision
+**Execute User Stories**: Yes
+
+**Reasoning**: 외부 소비자가 직접 사용하는 API이며 정상 다운로드, 잘못된 메타데이터, 누락 파일, 경로 공격이 서로 다른 관찰 가능한 결과를 가진다. 사용자 스토리는 R-16 요구사항과 자동화 테스트 간 추적성을 제공한다.
+
+### Expected Outcomes
+- API 소비자와 최종 사용자 관점의 다운로드 성공 기준 정의
+- Artifact 등록자와 다운로드 요청자의 보안 경계 분리
+- HTTP 403/404 및 응답 헤더 계약의 테스트 추적성 확보

@@ -147,3 +147,72 @@
 - **Automation Required**: Yes
 - **Expected Test Level**: integration/performance
 - **Required Test Evidence**: `test_openscad_timeout`에서 30초 이상 실행되는 무한 렌더링 scad 파일을 인위적으로 인입시킨 뒤, 30초 뒤에 `TimeoutExpired` 예외가 발생하며 OS 프로세스가 해제되는지 검증한다.
+
+---
+
+## 3. R-16 Artifact ID 기반 보안 다운로드 스토리
+
+### Story S-8: Artifact ID로 생성 결과물 안전하게 다운로드
+
+**As a** 김민수(최종 사용자),  
+**I want** 서버 경로나 파일명을 직접 제공하지 않고 `artifact_id` 기반 링크로 생성 결과물을 다운로드하고 싶다,  
+**So that** 변조된 경로로부터 보호받으면서 원래 파일명과 미디어 타입이 유지된 결과물을 안전하게 사용할 수 있다.
+
+#### Acceptance Criteria
+
+##### 시나리오 1: 안전한 Artifact 등록
+- **Given** 소유 Job의 workspace root 안에 일반 파일이 존재하고 등록할 `relative_path`가 유효한 상대경로일 때,
+- **When** Artifact 등록 주체가 해당 파일을 Artifact로 등록하면,
+- **Then** 서비스는 workspace root 기준 경로를 검증하고 `id`, `job_id`, `relative_path`, `filename`, `content_type` 메타데이터를 영속화한다.
+- **And** 절대경로, 빈 경로, `.`, `..`, `../` segment 또는 플랫폼별 동등 경로 segment가 포함되면 메타데이터 영속화 전에 거부한다.
+
+##### 시나리오 2: Artifact ID 기반 다운로드 성공
+- **Given** DB에 유효한 Artifact 메타데이터가 있고 연결된 소유 Job workspace root 내부에 일반 파일이 존재할 때,
+- **When** 민수의 클라이언트가 `GET /api/v1/artifacts/{artifact_id}/download`를 호출하면,
+- **Then** 서비스는 `artifact_id`만으로 메타데이터와 소유 Job workspace root를 조회한다.
+- **And** 등록 시점 검증을 신뢰하지 않고 `Path.resolve()`와 `Path.is_relative_to()` 또는 안전한 동등 헬퍼로 물리 경로를 다시 검증한다.
+- **And** HTTP 200 파일 응답은 Artifact의 `content_type`을 `Content-Type`으로, Artifact의 `filename`을 `Content-Disposition` 다운로드 filename으로 제공한다.
+
+##### 시나리오 3: 경로 공격 차단
+- **Given** DB 메타데이터가 변조되었거나 레거시 데이터가 traversal, 절대경로 또는 workspace와 공통 문자열 접두사만 가진 형제 경로를 가리킬 때,
+- **When** 다운로드 서비스가 대상 경로를 다시 해석하면,
+- **Then** `../` traversal, 절대경로 및 prefix-bypass를 HTTP 403으로 차단한다.
+- **And** 문자열 `startswith`만으로 경로 경계를 판단하지 않는다.
+- **And** 사용자 응답에는 workspace root나 대상 파일의 절대 서버 경로를 포함하지 않는다.
+
+##### 시나리오 4: 찾을 수 없는 Artifact
+- **Given** `artifact_id`가 DB에 없거나, DB 메타데이터는 있지만 물리 파일이 없거나, 대상이 일반 파일이 아닐 때,
+- **When** 다운로드 API가 호출되면,
+- **Then** HTTP 404를 반환한다.
+- **And** 사용자 응답에는 절대 서버 경로를 포함하지 않는다.
+
+##### 시나리오 5: 향후 권한 검사 확장성
+- **Given** R-16에서는 인증·인가가 구현 범위 밖일 때,
+- **When** Artifact 조회와 다운로드 결정 흐름을 구성하면,
+- **Then** 라우터가 아닌 `ArtifactService` 내부에 추후 소유권 또는 권한 검사를 삽입할 수 있는 구조를 유지한다.
+
+#### Verification Expectations
+- **Automation Required**: Yes
+- **Expected Test Level**: unit/integration/contract/security
+- **Required Test Evidence**:
+  - 서비스 단위 테스트로 정상 상대경로 등록과 절대경로, 빈 경로, `.`, `..`, `../` segment 거부를 검증한다.
+  - API 통합 테스트로 성공 다운로드의 파일 바이트, `Content-Type`, `Content-Disposition` filename을 검증한다.
+  - 알 수 없는 `artifact_id`, 누락 파일, 일반 파일이 아닌 대상이 각각 HTTP 404인지 검증한다.
+  - DB에 주입된 traversal, 절대경로, prefix-bypass 메타데이터가 각각 HTTP 403인지 검증한다.
+  - 모든 실패 응답에 절대 서버 경로가 포함되지 않는지 검증한다.
+  - 전체 기존 테스트 스위트의 회귀가 없는지 검증한다.
+
+#### INVEST 검증
+- **Independent**: 기존 Job 생성·SSE 흐름과 독립적으로 Artifact 등록 및 다운로드 계약을 검증할 수 있다.
+- **Negotiable**: 내부 파일 배치 방식은 변경할 수 있으나 ID 전용 API와 보안·HTTP 계약은 유지한다.
+- **Valuable**: 최종 사용자가 생성 결과물을 안전하고 예측 가능한 방식으로 받는다.
+- **Estimable**: Artifact 모델, 서비스, 라우터, 마이그레이션 및 제한된 테스트 범위로 산정할 수 있다.
+- **Small**: 단일 다운로드 사용자 여정과 그 선행 등록 경계로 제한된다.
+- **Testable**: 정상 응답, 헤더, 403, 404 및 경로 검증을 자동화할 수 있다.
+
+#### 추적성
+- **Requirement**: R-16
+- **Primary Persona**: R16-P1 김민수
+- **Supporting Persona**: R16-P2 API 클라이언트 개발자
+- **Supporting Actor**: R16-A1 Artifact 등록 주체
+- **Implementation Verification Target**: Artifact 등록 서비스 단위 테스트와 다운로드 API 통합·보안 테스트

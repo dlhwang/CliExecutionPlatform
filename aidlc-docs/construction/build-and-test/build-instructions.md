@@ -1,175 +1,57 @@
-# 빌드 지침서 (Build Instructions)
-# CLI Execution Platform - Backend
+# 빌드 지침 (Build Instructions)
 
-## 사전 요구 사항 (Prerequisites)
+본 지침은 CLI-Execution-Platform 프로젝트의 전체 빌드 및 환경 구성 단계를 설명합니다.
 
-| 항목 | 버전 / 설명 |
-|------|-----------|
-| **런타임** | Python 3.10 이상 |
-| **패키지 관리자** | pip (venv 가상 환경 권장) |
-| **데이터베이스** | PostgreSQL 14+ (프로덕션) / SQLite (테스트 전용) |
-| **운영 체제** | Linux, macOS, Windows 지원 |
-| **디스크 공간** | 최소 500MB (venv 포함) |
+## 필수 요구사항 (Prerequisites)
+- **런타임 및 빌드 도구**: Python 3.13+ 및 pip
+- **가상환경 도구**: venv (Python 내장 패키지)
+- **종속성 라이브러리**: `requirements.txt`에 명시된 외부 라이브러리 (FastAPI, SQLAlchemy, Uvicorn, SlowAPI, PyJWT 등)
+- **데이터베이스**: SQLite (로컬 테스트용) 또는 PostgreSQL (실행/배포 환경)
+- **시스템 요구사항**: Windows / Linux / macOS (현재 로컬 검증은 Windows 11 환경 기준)
 
-### 환경 변수 (Environment Variables)
+## 환경 설정 및 빌드 단계
 
-| 변수명 | 설명 | 필수 여부 |
-|-------|------|---------|
-| `DATABASE_URL` | PostgreSQL 접속 URL (`postgresql://user:pass@host:5432/db`) | 필수 |
-| `ALLOWED_ORIGINS` | CORS 허용 도메인 (콤마 구분, 개발 시 `*` 가능) | 선택 |
-| `OPENSCAD_BIN_PATH` | OpenSCAD CLI 실행 파일 절대 경로 | 선택 (기본값: `openscad`) |
-
----
-
-## 빌드 단계 (Build Steps)
-
-### 1. 저장소 클론 및 디렉토리 이동
-
+### 1. 가상환경 생성 및 활성화
 ```bash
-git clone <repository-url>
-cd CLI-Execution-Platform
-```
-
-### 2. 가상 환경 생성 및 활성화
-
-```bash
-# 가상 환경 생성
+# 가상환경 생성
 python -m venv venv
 
-# 활성화 (Linux/macOS)
-source venv/bin/activate
+# Windows PowerShell에서 가상환경 활성화
+.\venv\Scripts\Activate.ps1
 
-# 활성화 (Windows PowerShell)
-venv\Scripts\Activate.ps1
+# Linux/macOS에서 가상환경 활성화
+source venv/bin/activate
 ```
 
-### 3. 의존 패키지 설치
-
+### 2. 의존성 설치
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. 환경 변수 설정
-
-```bash
-# .env.sample을 복사하여 실제 값 입력
-cp .env.sample .env
-# .env 파일에서 DATABASE_URL 등 설정
-```
-
-### 5. 애플리케이션 기동 (개발 서버)
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### 6. 빌드 성공 검증
-
-- **기대 출력**: `INFO: Uvicorn running on http://0.0.0.0:8000`
-- **헬스체크**: `GET http://localhost:8000/docs` → FastAPI Swagger UI 확인
-- **빌드 산출물**: 실행 가능한 ASGI 애플리케이션 (`main.py:app`)
-
----
-
-## 디렉토리 구조 (Project Structure)
-
-```
-CLI-Execution-Platform/
-├── main.py               # FastAPI 진입점
-├── database.py           # SQLAlchemy 엔진 + 세션 팩토리
-├── limiter.py            # slowapi Rate Limiter
-├── requirements.txt      # 의존 패키지 목록
-├── jobs/                 # Job 도메인
-├── storage/              # 파일 저장소 추상화
-├── llm/                  # LLM 파서 및 보안 검증기
-├── runner/               # CLI 실행 서비스
-├── sse/                  # SSE 스트리밍 서비스
-├── orchestrator/         # 반복 수정 오케스트레이터 서비스
-└── tests/                # 통합 테스트
-```
-
----
-
-## 트러블슈팅 (Troubleshooting)
-
-### 의존성 설치 오류
-
-- **원인**: pip 버전이 오래되었거나 가상 환경이 활성화되지 않음
-- **해결**: `pip install --upgrade pip` 후 재시도
-
-### `DATABASE_URL` 연결 오류
-
-- **원인**: PostgreSQL 서버 미기동 또는 접속 정보 오류
-- **해결**: `.env`의 `DATABASE_URL` 값 확인 후 PostgreSQL 서버 상태 점검
-
-### `OPENSCAD_BIN_PATH` 관련 오류
-
-- **원인**: OpenSCAD가 미설치되었거나 PATH에 없음
-- **해결**: OpenSCAD 설치 후 `.env`에 절대 경로 설정 (테스트 실행 시에는 불필요)
-
----
-
-## R-13 활성 빌드 기준: Linux/WSL2 및 Docker Compose
-
-이 섹션이 R-13 이후의 현재 빌드 기준이다. 네이티브 Windows Python 실행은 지원하지 않는다.
-
-### 사전 요구사항
-
-- WSL2 Linux 배포판 또는 Linux host
-- Docker Engine 및 Docker Compose V2
-- 기존 외부 PostgreSQL과 컨테이너에서 도달 가능한 hostname
-- `.env.sample`을 복사한 ASCII-only `.env`
-
-### Compose 빌드
-
+### 3. 환경 변수 파일 설정
+프로젝트 루트 디렉토리에 `.env` 파일을 생성하고 필요한 환경 설정을 추가합니다. `.env.sample` 파일을 참고하여 설정할 수 있습니다.
 ```bash
 cp .env.sample .env
-# Edit .env with the existing external DB and LLM credentials.
-docker compose config
-docker compose build
 ```
+*주의*: `.env` 파일은 UTF-8(BOM 없음) 인코딩으로 저장되어야 합니다.
 
-성공 기준:
+### 4. 데이터베이스 마이그레이션 (필요시)
+Alembic 등을 이용한 데이터베이스 초기화 스키마를 확인합니다. 본 프로젝트는 실행 시 SQLAlchemy ORM `Base.metadata.create_all`을 통해 필요한 테이블 구조를 자동 생성합니다.
 
-- Compose service 목록은 `app`과 `db` 두 개다.
-- 이미지에 Python 3.13, OpenSCAD, Xvfb와 xauth가 설치된다.
-- 실제 `.env`는 이미지 layer에 포함되지 않는다.
-
-### 실행 및 상태 확인
-
+### 5. 빌드 및 구성 검증
 ```bash
-docker compose up -d
-docker compose ps
-docker compose logs -f app
+# PYTHONPATH 설정 및 Uvicorn 개발 서버 정상 구동 확인
+$env:PYTHONPATH="."
+python main.py
 ```
+- **기대 결과**: Uvicorn 서버가 `http://127.0.0.1:8000`에서 정상적으로 구동되고 API 문서(docs)에 접속 가능해야 합니다.
 
-`app`과 `db` 서비스가 모두 healthy 상태여야 하며 `http://localhost:${APP_PORT:-8000}/`가 응답해야 한다.
+## 트러블슈팅
 
-### 데이터베이스 연결 주의사항
+### 1. UnicodeDecodeError (cp949 관련)
+- **원인**: Windows 환경에서 `.env` 파일을 로드할 때 시스템 기본 인코딩(CP949)으로 파일 읽기를 시도하여 발생합니다.
+- **해결책**: `.env` 파일이 UTF-8(BOM 없음)로 저장되었는지 확인하고, `main.py`나 `limiter.py`에서 `dotenv` 패키지의 `load_dotenv` 호출 시 명시적으로 `encoding="utf-8"` 파라미터를 지정하도록 코드가 이미 조치되어 있습니다.
 
-- Compose 설정에 의해 `app` 서비스는 `db` 서비스의 헬스체크 통과 이후 구동됩니다.
-- `DATABASE_URL` 환경 변수는 `app` 컨테이너 기동 시 `postgresql://[USER]:[PASSWORD]@db:5432/[DB]` 형태로 자동 주입되며, 로컬/원격 설정은 `.env` 파일의 PostgreSQL 변수들을 통해 커스텀할 수 있습니다.
-
-### 안전한 종료
-
-```bash
-docker compose down
-```
-
-`docker compose down -v`는 `postgres_data`와 `workspace_data`의 데이터(Job 및 artifact 등)를 모두 영구 삭제하므로 신중히 사용해야 합니다.
-
----
-
-## R-15A/B/C 빌드 검증
-
-```powershell
-.\venv\Scripts\python.exe -m compileall -q llm runner orchestrator storage tests
-.\venv\Scripts\python.exe -m pytest tests -q --basetemp=.test-tmp\r15-build-test
-```
-
-성공 기준:
-
-- Python compileall exit code 0
-- 전체 79개 테스트 통과, 실패 0개
-- `runner/diagnostics.py` import 성공
-- 실제 Docker/OpenSCAD smoke는 Docker CLI가 있는 Linux/WSL2 환경에서 별도 실행
+### 2. ModuleNotFoundError: No module named 'database'
+- **원인**: 파이썬 인터프리터가 프로젝트 루트 경로를 모듈 탐색 경로에 포함하지 않아 발생합니다.
+- **해결책**: 환경 변수로 `PYTHONPATH`를 `.` 또는 프로젝트 루트의 절대 경로로 명시해야 합니다. (예: `$env:PYTHONPATH="."`)

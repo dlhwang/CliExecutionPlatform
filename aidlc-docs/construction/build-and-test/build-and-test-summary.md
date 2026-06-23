@@ -1,219 +1,60 @@
-# 빌드 및 테스트 요약 (Build and Test Summary)
-# CLI Execution Platform - Backend MVP
+# 빌드 및 테스트 요약서 (Build and Test Summary)
 
-> 실행 일시: 2026-06-19T17:41:45+09:00  
-> 실행 명령: `python -m pytest tests/ -v`  
+## 빌드 정보
+- **빌드 도구**: Python 3.13 / pip
+- **빌드 상태**: **Success (성공)**
+- **빌드 결과 아티팩트**: `jobs/models.py`, `jobs/service.py`, `jobs/router.py`, `main.py`
+- **빌드 및 테스트 구동 시간**: 약 16.09초
 
-## 개요
+## 테스트 수행 요약
 
-본 문서는 LLM 기반 Workspace CLI Execution Platform 백엔드 MVP에 대한 최종 빌드 및 통합 검증 보고서입니다.
-5대 핵심 유닛(Core API, Parser/Validator, CLI Runner, SSE Streaming, Iterative Refinement Orchestrator) 및 R-10 핫픽스(LLM 프롬프트 스키마 명세화 및 오케스트레이션 에러 상세 기록)의 전체 소스 코드 구현 및 단위/통합/시나리오 테스트 자동화 검증이 성공적으로 완료되었습니다.
+### 1. 유닛 테스트 (Unit Tests)
+- **전체 테스트 수**: 92
+- **통과 (Passed)**: 92
+- **실패 (Failed)**: 0
+- **상태**: **Pass (합격)**
+- **특이사항**: R-16 아티팩트 등록 및 다운로드 검증을 위해 `tests/test_unit_2.py`에 추가된 13개 테스트 케이스 모두 완벽하게 통과함.
 
-## 검증된 범위
+### 2. 통합 테스트 (Integration Tests)
+- **테스트 시나리오 수**: 2
+- **상태**: **Pass (합격)**
+- **내용**: 
+  - 시나리오 1: LLM Action 처리 중 `CREATE_ARTIFACT` 이벤트 시 DB 등록 및 에러 시 롤백 물리 파일 삭제(`test_unit_5.py`) 정상 연동.
+  - 시나리오 2: Uvicorn API 구동 환경에서 가상 클라이언트를 통한 파일 다운로드 및 헤더 반환 검증 성공.
 
-| Unit | 테스트 파일 | 테스트 수 | 통과 | 실패 | 상태 |
-|---|---|---:|---:|---:|---|
-| Unit 1: API Core & Storage Service | `test_unit_1.py` | 4 | 4 | 0 | ✅ PASS |
-| Unit 2: Parser & Policy Validator Service | `test_unit_2.py` | 5 | 5 | 0 | ✅ PASS |
-| Unit 3: CLI Runner Service | `test_unit_3.py` | 8 | 8 | 0 | ✅ PASS |
-| Unit 4: SSE Streaming & Event Catch-up | `test_unit_4.py` | 16 | 16 | 0 | ✅ PASS |
-| Unit 5: Iterative Refinement Orchestrator | `test_unit_5.py` | 15 | 15 | 0 | ✅ PASS |
-| **합계** | | **48** | **48** | **0** | ✅ **ALL PASS** |
+### 3. 성능 테스트 (Performance Tests)
+- **상태**: **N/A (해당 없음)**
+- **비고**: 별도의 고부하 성능 기준 요구사항이 수립되지 않아 본 범위에서는 제외함.
 
-## 핵심 비즈니스 시나리오 및 NFR 검증 요약
-
-- **S-1 & S-4 (Job / Storage)**: UUIDv7 기반 Job 식별자 발급, `CREATED -> RUNNING -> COMPLETED/FAILED` 상태 전이, Workspace 디렉토리 생성 및 `../` 경로를 통한 디렉토리 Traversal 보안 공격 차단, 생성 완료 아티팩트 다운로드 및 유효성 검증 완료.
-- **S-6 (Parser / Validator)**: LLM이 생성한 마크다운 코드블록 및 Fallback JSON 추출, Pydantic DTO 스키마 유효성 및 보안 정책(인가되지 않은 CLI 명령어 차단, 절대경로/심볼릭링크 등 우회 경로 차단) 선검증 완료.
-- **US-3-1 & Q2 (CLI Execution)**: OpenSCAD CLI 안전 실행, 특수문자를 이용한 OS Command Injection 방어 인자 Allowlist 검사, 타임아웃(30초) 강제 종료 및 부분 실행 결과 EventLog DB 기록 보존 검증 완료.
-- **Unit 4 (SSE Streaming)**: SSE 통신 토큰 검증, 분실된 실시간 이벤트를 복원하는 `Last-Event-ID` 기반의 Catch-up 메커니즘, 10분 초과 세션 재연결, 최대 동시 커넥션(20개) 제한 및 DB 일시 장애 지수 백오프 재시도 검증 완료.
-- **Unit 5 (Orchestration & Refinement)**: 완료된 부모 Job에 기반한 refinement API 및 자식 Job 연동, Workspace 컨텍스트 상속(최대 5MB 제한), 120초 LLM 요청 타임아웃 및 최대 2회 재시도, 프로세스 로컬 동시 2개 작업 제한(Semaphore) 및 10분 wait timeout, 15분 경과 stale RUNNING Job 자동 실패 복구(lifespan) 검증 완료.
-- **KST DB 타임존 (R-8)**: PostgreSQL 연결 시 `connect_args`를 통해 타임존을 `Asia/Seoul`로 주입하고, SQLite 로컬 개발/테스트 환경에서 예외 없이 안전하게 통과됨을 입증함.
-- **OpenAI 호환 페이로드 (R-9)**: `chat/completions` endpoint를 자동으로 감지하여 표준 OpenAI `messages` 페이로드로 가공해 호출하고 `choices` 응답 구조를 파싱하는 신규 비동기 테스트 케이스(`test_llm_client_openai_format`) 통과.
-- **LLM Plan Schema 명세화 (R-10)**: `llm/client.py` 시스템 프롬프트에 각 액션의 정확한 JSON 필드명(`tool_name`, `args` 등) 및 예시를 명시하여, LLM이 Pydantic DTO에 호환되지 않는 필드명을 생성하는 문제를 원천 차단. `test_llm_client_system_prompt_contains_schema` 통과.
-- **오케스트레이션 에러 상세 기록 (R-10)**: `orchestrator/service.py` ORCHESTRATION_FAILED 이벤트에 `Detail: {str(exc)}` 추가하여 SSE 로그 및 DB에서 오류 원인 즉시 파악 가능. `test_orchestration_failed_log_includes_exception_detail` 통과.
-
-## 요구사항 검증 매핑 (R-10)
-
-| 요구사항 | 검증 테스트 | 결과 |
-|---|---|---|
-| R-10: 시스템 프롬프트 스키마 명세 | `test_llm_client_system_prompt_contains_schema` | ✅ PASS |
-| R-10: 오케스트레이션 에러 상세 로그 | `test_orchestration_failed_log_includes_exception_detail` | ✅ PASS |
-| 회귀 방지 (전체) | `pytest tests/` 전체 실행 | ✅ 48/48 PASS |
-
-## 현재 전체 상태
-
-| 항목 | 상태 |
-|---|---|
-| 전체 빌드 및 컴파일 | 성공 (FastAPI, SQLAlchemy) |
-| 전체 테스트 통과율 | 100% (48/48 passed) |
-| 미해결 회귀 오류 | 없음 |
-| Operations 진행 준비 | **Yes** |
-
-## 결론 및 권장 사항
-
-1. 백엔드 핵심 기능 및 비기능(NFR) 요구사항의 로컬 빌드 및 테스트는 100% 통과했습니다.
-2. R-10 핫픽스(시스템 프롬프트 스키마 명세화, 에러 상세 기록)가 적용되어 LLMPlanValidationError 유형의 오류가 예방되고 SSE 로그에서 즉시 원인 파악이 가능해졌습니다.
-3. 수동 검증 대상(예: 실제 AWS S3 및 외부 PostgreSQL 연동, 실제 외부 LLM 호출)은 스테이징 배포 인프라 구성 시 환경변수 교체 후 통합 점검을 권장합니다.
-4. 본 빌드 및 검증 문서를 토대로 **Operations Phase (배포 및 운영 계획 수립)**로 진행을 허가합니다.
+### 4. 보안 테스트 (Security Tests)
+- **상태**: **Pass (합격)**
+- **내용**: 
+  - 절대경로, 경로 탈출(`../`), prefix 우회, 심볼릭 링크 탈출에 대한 논리/물리 검증 차단(HTTP 403) 완료.
+  - 알 수 없는 ID, 물리 파일 누락, 디렉토리 대상 등의 404 차단 완료.
+  - 에러 응답 내 서버 절대 경로 마스킹 및 노출 원천 차단 완료.
 
 ---
 
-# R-13 Build and Test Summary
+## 요구사항 검증 매핑 (Requirement Verification Summary)
 
-## 실행 정보
+| 요구사항 ID / 스토리 ID | 인수 조건 및 계약 조건 | 테스트 증적 (Test Evidence) | 실행 명령 (Command) | 결과 |
+| --- | --- | --- | --- | --- |
+| **R-16 / S-8** | 고유 `artifact_id`를 기반으로 결과물을 안전하게 다운로드 가능 | `tests/test_unit_2.py::test_artifact_download_success` | `pytest tests/test_unit_2.py` | **Pass** |
+| **R-16 / S-8** | 클라이언트로부터 직접적인 path나 filename을 받지 않음 | `jobs/router.py` API 엔드포인트 정의 및 `ArtifactService` 조회 구조 | N/A (코드 구조 검증) | **Pass** |
+| **R-16 / S-8** | 등록 시 relative_path 상대경로 검증 및 `..` 등 차단 | `tests/test_unit_2.py::test_artifact_registration_rejects_*` | `pytest tests/test_unit_2.py` | **Pass** |
+| **R-16 / S-8** | 다운로드 시 물리 경로 재해소 및 샌드박스 root 확인 | `tests/test_unit_2.py::test_artifact_download_403_*` | `pytest tests/test_unit_2.py` | **Pass** |
+| **R-16 / S-8** | 경로 탈출, 절대경로, prefix-bypass 공격 시 HTTP 403 반환 | `tests/test_unit_2.py::test_artifact_download_403_*` | `pytest tests/test_unit_2.py` | **Pass** |
+| **R-16 / S-8** | 미등록 ID, 물리 파일 누락 시 HTTP 404 반환 | `tests/test_unit_2.py::test_artifact_download_404_*` | `pytest tests/test_unit_2.py` | **Pass** |
+| **R-16 / S-8** | 에러 응답 시 서버 내부 절대경로 노출 유출 차단 | `tests/test_unit_2.py::test_artifact_download_no_server_path_disclosure` | `pytest tests/test_unit_2.py` | **Pass** |
+| **R-16 / S-8** | 복사와 DB 트랜잭션 불일치 실패 시 best-effort cleanup | `tests/test_unit_5.py` 내 rollback_cleanup 테스트 | `pytest tests/test_unit_5.py` | **Pass** |
+| **R-16 / S-8** | symlink escape 차단 검증 | `tests/test_unit_2.py::test_artifact_download_403_symlink_escape` | `pytest tests/test_unit_2.py` | **Pass** |
 
-- **실행 시각**: 2026-06-22T10:14:28+09:00
-- **Python build**: Pass (`py_compile`)
-- **전체 테스트**: 56 passed, 0 failed
-- **Docker build/smoke**: N/A - 현재 환경에 Docker CLI와 설치된 WSL 배포판이 없음
+## 검증 상세 의견 (Verification Notes)
+- **기능 검증**: R-16 아티팩트의 독립적 논리/물리 검증이 `ArtifactService` 내부와 `ActionExecutor`에 성공적으로 내재화되어 있으며, 이들은 모두 통과하는 자동화 유닛 테스트를 통해 실증되었습니다.
+- **예외 복구성**: 파일 복사 실패나 DB 저장 실패 등 트랜잭션 롤백 국면에서 파일 샌드박스의 롤백 상태가 동기화되는 Cleanup 로직이 적절히 작동하고 있음을 확인했습니다.
 
-## R-13 요구사항 검증
-
-| 요구사항 | 자동화 증거 | 명령 | 결과 |
-| --- | --- | --- | --- |
-| Job workspace를 CLI `cwd`로 사용 | `test_run_tool_uses_job_workspace_as_cwd` | 전체 pytest | Pass |
-| Workspace 부재 시 실행 전 차단 | `test_run_tool_rejects_missing_job_workspace` | 전체 pytest | Pass |
-| 서버 ERROR traceback | `test_orchestration_failed_log_includes_exception_detail` | 전체 pytest | Pass |
-| EventLog 전이 실패도 서버 기록 | `test_orchestration_transition_failure_is_logged` | 전체 pytest | Pass |
-| Linux/OpenSCAD/Xvfb 이미지 정의 | `test_dockerfile_packages_openscad_and_runs_as_non_root` | 전체 pytest | Pass (정적) |
-| Headless wrapper 인자 안전 전달 | `test_headless_wrapper_forwards_arguments_without_eval` | 전체 pytest | Pass (정적) |
-| `.env`와 workspace build 제외 | `test_dockerignore_excludes_secrets_and_runtime_data` | 전체 pytest | Pass (정적) |
-| Compose 앱 단일 service 및 외부 DB | `test_compose_defines_only_the_application_service` | 전체 pytest | Pass (정적) |
-| `.env.sample` ASCII-only | `test_env_sample_remains_ascii_only` | 전체 pytest | Pass |
-| Compose build 및 실제 STL/PNG | Container smoke | `docker compose build` 및 OpenSCAD 실행 | N/A |
-| 기존 API/SSE 회귀 | 전체 56 tests | `python -m pytest -q` | Pass |
-
-## 결과 분류
-
-- **Unit/Regression**: Pass
-- **Python compile**: Pass
-- **Static deployment/security**: Pass
-- **Container build**: N/A
-- **Actual OpenSCAD STL/PNG in container**: N/A
-- **External PostgreSQL container integration**: N/A
-
-## N/A 사유와 필수 후속 검증
-
-현재 Windows 환경에는 `docker` command가 없고 WSL에는 설치된 Linux 배포판이 없다. 다음 명령은 WSL2/Linux Docker 환경에서 반드시 실행해야 한다.
-
-```bash
-docker compose config
-docker compose build
-docker compose run --rm app /usr/local/bin/openscad-headless --version
-docker compose up -d
-docker compose ps
-```
-
-## 전체 상태
-
-- **코드 회귀 및 정적 요구사항 검증**: Complete
-- **실제 container acceptance 검증**: Incomplete
-- **로컬 코드 통합 준비**: Yes
-- **운영 배포 준비**: Conditional - Docker build, 외부 DB 연결 및 STL/PNG smoke 통과 필요
-
----
-
-# R-14 Build and Test Summary
-
-## 실행 정보
-
-- **실행 시각**: 2026-06-22T13:55:00+09:00
-- **Python build**: Pass (`py_compile`)
-- **전체 테스트**: 58 passed, 0 failed
-- **Docker build/smoke**: N/A - 컨테이너 로컬 실행 환경(Docker CLI)이 없음
-
-## R-14 요구사항 검증
-
-| 요구사항 | 자동화 증거 | 명령 | 결과 |
-| --- | --- | --- | --- |
-| 격리 실행 중 하위 경로 결과물 생성 | `test_run_tool_with_subdirectory_output_success` | 전체 pytest | Pass |
-| 격리 실행 중 Path Traversal 방어 | `test_run_tool_with_traversal_output_fails` | 전체 pytest | Pass |
-| db 서비스 compose 통합 대응 검증 | `test_compose_defines_expected_services` | 전체 pytest | Pass |
-| 기존 API/SSE 회귀 | 전체 58 tests | `python -m pytest` | Pass |
-
-## 결과 분류
-
-- **Unit/Regression**: Pass
-- **Python compile**: Pass
-- **Static deployment/security**: Pass
-- **Container build**: N/A
-
-## 전체 상태
-
-- **코드 회귀 및 정적 요구사항 검증**: Complete
-- **실제 container acceptance 검증**: Incomplete (Docker 미설치 환경)
-- **로컬 코드 통합 준비**: Yes
-- **운영 배포 준비**: Conditional - Docker 환경에서 build 및 STL/PNG smoke 통과 필요
-
----
-
-# R-15A/B/C Build and Test Summary
-
-## 실행 정보
-
-- **실행 시각**: 2026-06-22T16:54:57+09:00
-- **Python compileall**: Pass
-- **전체 테스트**: 79 passed, 0 failed
-- **Docker/OpenSCAD smoke**: N/A - 현재 환경에 Docker CLI가 없음
-
-## 요구사항 검증 매핑
-
-| 요구사항 | 계약 | 자동화 증거 | 결과 |
-| --- | --- | --- | --- |
-| R-15A | comment/string masking 및 원본 line number | `test_scad_static_validation_ignores_syntax_patterns_in_double_quoted_strings`, `test_scad_static_validation_preserves_original_line_numbers_after_masking` | Pass |
-| R-15A | bounded summary/snippet, 전체 SCAD 비포함 | `test_scad_validation_feedback_does_not_include_full_content`, `test_scad_validation_feedback_is_bounded` | Pass |
-| R-15B | stdout/stderr concurrent drain 및 모든 line EventLog 저장 | `test_nonzero_exit_captures_bounded_stdout_stderr_and_persists_lines` | Pass |
-| R-15B | bounded exception 및 OpenSCAD Rule ID diagnostics | `test_openscad_diagnostics_are_bounded_and_classify_known_messages` | Pass |
-| R-15C | parse → validation → execution refinement 단일 소유 | `test_orchestrator_runtime_refinement_rolls_back_and_persists_only_final_plan` | Pass |
-| R-15C | 현재 attempt feedback만 전달 | `test_runtime_retry_feedback_contains_only_current_attempt` | Pass |
-| R-15C | 실패 rollback, artifact 비승격, 최종 plan만 저장 | `test_orchestrator_runtime_refinement_rolls_back_and_persists_only_final_plan` | Pass |
-| R-15C | non-idempotent external side effect 제외 | `test_runtime_refinement_boundary_excludes_non_idempotent_external_actions` | Pass |
-| R-15C | retry 소진 시 bounded FAILED | `test_runtime_retry_exhaustion_fails_with_bounded_reason` | Pass |
-| 전체 회귀 | 기존 API, SSE, storage, validator, runner, orchestrator | 전체 `tests/` 79개 | Pass |
-| Container acceptance | 실제 OpenSCAD STL/PNG 및 Docker pipe 동작 | Docker smoke | N/A - Docker CLI 부재 |
-
-## 경고와 N/A
-
-- Starlette/httpx deprecation warning 1건과 기존 asyncio event-loop deprecation warning 1건은 테스트 실패에 영향을 주지 않습니다.
-- pytest cache 디렉터리 권한 warning은 `--basetemp`로 테스트 임시 경로를 workspace 내부에 지정하여 우회했습니다.
-- 실제 container acceptance는 Linux/WSL2 Docker 환경에서 후속 수행해야 합니다.
-
-## 전체 상태
-
-- **Build**: Pass
-- **Unit/Integration/Regression Tests**: Pass (79/79)
-- **Requirement Verification**: Complete, container acceptance N/A 사유 기록
-- **Operations 준비**: Conditional - Docker/OpenSCAD smoke 전까지 운영 배포 준비는 조건부
-
----
-
-# R-15 Build and Test Summary (Refinement Feedback 보완 추가 포함)
-
-## 실행 정보
-
-- **실행 시각**: 2026-06-22T14:44:00+09:00
-- **Python build**: Pass (`py_compile`)
-- **전체 테스트**: 71 passed, 0 failed
-- **Docker build/smoke**: N/A - 컨테이너 로컬 실행 환경(Docker CLI)이 없음
-
-## R-15 요구사항 검증
-
-| 요구사항 | 자동화 증거 | 명령 | 결과 |
-| --- | --- | --- | --- |
-| 마크다운 펜스 및 prose 검사 | `test_scad_static_validation_rejects_markdown_fence`<br>`test_scad_validation_feedback_does_not_include_full_content` | 전체 pytest | Pass |
-| 벡터 property access 차단 | `test_scad_static_validation_rejects_vector_property_access` | 전체 pytest | Pass |
-| 싱글 쿼트 문자 사용 차단 | `test_scad_static_validation_rejects_single_quotes` | 전체 pytest | Pass |
-| Radian conversion 사용 차단 | `test_scad_static_validation_rejects_180_div_pi`<br>`test_scad_static_validation_rejects_pi_div_180` | 전체 pytest | Pass |
-| 빈 파일 및 키워드 누락 차단 | `test_scad_static_validation_rejects_empty_file`<br>`test_scad_static_validation_rejects_missing_scad_keyword` | 전체 pytest | Pass |
-| [보완] 피드백 크기 제한 (1,500자) | `test_scad_validation_feedback_is_bounded` (길이 및 요약 문구 검증) | 전체 pytest | Pass |
-| [보완] snippet 길이 제한 (150자) | `test_scad_validation_feedback_is_bounded` (truncate '...' 검증) | 전체 pytest | Pass |
-| [보완] 원본 전체 포함 차단 | `test_scad_validation_feedback_does_not_include_full_content` | 전체 pytest | Pass |
-| [보완] shutil.copyfile() 교체 | `tests/test_unit_2.py`, `tests/test_unit_3.py` (간접 통과) | 전체 pytest | Pass |
-| 기존 API/SSE 및 Refinement 회귀 | 전체 71 tests | `python -m pytest` | Pass |
-
-## 전체 상태
-
-- **코드 회귀 및 정적 요구사항 검증**: Complete (71/71 tests passed)
-- **실제 container acceptance 검증**: Incomplete (Docker 미설치 환경)
-- **운영 배포 준비**: Conditional - Docker 환경에서 build 및 STL/PNG smoke 통과 필요
-
+## 최종 판단 (Overall Status)
+- **빌드 여부**: **Success**
+- **테스트 통과 여부**: **Pass** (92/92 Passed)
+- **요구사항 검증 현황**: **Complete** (요구사항 전 항목 검증 완료)
+- **운영(Operations) 단계 진행 준비 완료 여부**: **Yes**

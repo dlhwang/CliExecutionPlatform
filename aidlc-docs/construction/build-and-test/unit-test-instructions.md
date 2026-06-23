@@ -1,215 +1,75 @@
-# 단위 테스트 실행 지침서 (Unit Test Execution Instructions)
+# 유닛 테스트 실행 지침 (Unit Test Execution Instructions)
 
-## 개요
+본 지침은 CLI-Execution-Platform 프로젝트의 유닛 테스트 구성 및 실행 방법을 설명합니다. 특히 R-16(보안 아티팩트 다운로드 API) 개발과 관련된 핵심 테스트 케이스의 검증 방식을 서술합니다.
 
-본 프로젝트의 모든 테스트는 **pytest** 기반 통합 테스트로 구성되며,
-SQLite 인메모리 DB를 활용하여 PostgreSQL 없이 완전 자동화 실행이 가능합니다.
+## 테스트 실행 환경
+- **테스트 러너**: `pytest`
+- **테스트 경로**: `tests/`
+- **사전 요구사항**: Python 가상환경이 활성화되고 `requirements.txt` 패키지들이 설치된 상태여야 합니다.
 
----
+## 유닛 테스트 실행 방법
 
-## 테스트 환경 요구 사항
-
-- Python 3.10+ 가상 환경 활성화 상태
-- `pip install -r requirements.txt` 완료
-- 실제 OpenSCAD CLI **불필요** (Unit 3 테스트는 Python 인터프리터 및 Mock으로 대체)
-
----
-
-## 전체 테스트 실행
-
-### 1. 전체 유닛 테스트 일괄 실행
-
+### 1. 전체 유닛 및 기능 테스트 실행
 ```bash
-pytest tests/ -v
+# Windows PowerShell
+$env:PYTHONPATH="."
+venv\Scripts\pytest
+
+# Linux/macOS
+export PYTHONPATH="."
+pytest
 ```
 
-### 2. 유닛별 개별 실행
-
+### 2. 특정 테스트 모듈만 단독 실행 (R-16 아티팩트 검증 위주)
 ```bash
-# Unit 1: API Core & Storage Service
-pytest tests/test_unit_1.py -v
-
-# Unit 2: Parser & Policy Validator Service
-pytest tests/test_unit_2.py -v
-
-# Unit 3: CLI Runner Service
-pytest tests/test_unit_3.py -v
+# Windows PowerShell
+$env:PYTHONPATH="."
+venv\Scripts\pytest tests/test_unit_2.py
 ```
 
-### 3. 특정 테스트 케이스 단독 실행
+## R-16 및 S-8 관련 핵심 유닛 테스트 케이스 목록
 
-```bash
-pytest tests/test_unit_3.py::test_timeout_kills_process -v
-```
+`tests/test_unit_2.py`에 추가된 R-16 아티팩트 보안 검증 테스트는 다음과 같습니다:
 
----
+1. **정상 경로 등록 검증** (`test_artifact_registration_accepts_valid_paths`):
+   - 정상적인 workspace 상대경로에 위치한 아티팩트의 정상 등록 확인.
 
-## 테스트 결과 요약 (Build and Test 단계 실측 기준)
+2. **절대경로 등록 차단 검증** (`test_artifact_registration_rejects_absolute_paths`):
+   - `/etc/passwd` 등 절대경로로 등록 시도 시 즉각 차단 및 예외 발생 확인.
 
-| 유닛 | 테스트 파일 | 테스트 수 | 통과 | 실패 | 상태 |
-|------|-----------|---------|------|------|------|
-| Unit 1 | `test_unit_1.py` | 4 | 4 | 0 | ✅ PASS |
-| Unit 2 | `test_unit_2.py` | 5 | 5 | 0 | ✅ PASS |
-| Unit 3 | `test_unit_3.py` | 12 | 12 | 0 | ✅ PASS |
-| Unit 4 | `test_unit_4.py` | 16 | 16 | 0 | ✅ PASS |
-| Unit 5 | `test_unit_5.py` | 16 | 16 | 0 | ✅ PASS |
-| Deployment | `test_deployment.py` | 5 | 5 | 0 | ✅ PASS |
-| **합계** | | **58** | **58** | **0** | ✅ **ALL PASS** |
+3. **상대경로 탈출 등록 차단 검증** (`test_artifact_registration_rejects_traversal_segments`):
+   - `../file.txt`, `dir/./file.txt`, `dir//file.txt` 등 비정상적인 세그먼트 등록 시도 시 차단 확인.
 
-**실행 시간**: 4.12초 (로컬 SQLite 인메모리, 평균)
+4. **Windows 역슬래시 등록 차단 검증** (`test_artifact_registration_rejects_windows_backslash`):
+   - `models\\model.scad`와 같이 역슬래시가 포함된 경로 등록 차단 확인.
 
----
+5. **성공적인 아티팩트 다운로드 검증** (`test_artifact_download_success`):
+   - 아티팩트 ID를 기반으로 실제 workspace의 물리 파일이 정상 다운로드 경로를 반환하는지 확인.
 
-## 테스트 케이스 매핑 (기능 요구사항 검증 증거)
+6. **알 수 없는 아티팩트 ID 조회 시 404 반환** (`test_artifact_download_404_unknown_id`):
+   - DB에 기록이 없는 UUID로 요청 시 404 예외 확인.
 
-### Unit 1 테스트
+7. **물리 파일 누락 시 404 반환** (`test_artifact_download_404_missing_physical_file`):
+   - DB 메타데이터는 있으나 실제 물리 파일이 삭제된 경우 404 예외 확인.
 
-| 테스트 함수 | 검증 스토리/요구사항 | 내용 |
-|-----------|------------------|------|
-| `test_job_creation` | S-1 | UUIDv7 발급, DB CREATED 저장, Workspace 디렉토리 생성 검증 |
-| `test_directory_traversal_protection` | S-4 | `../` 경로 탈출 시 HTTP 403 반환 및 `PermissionError` 발생 검증 |
-| `test_rate_limiting` | NFR Rate Limiting | 분당 10회 초과 시 HTTP 429 반환 검증 |
-| `test_artifact_download` | S-4 | 정상 아티팩트 다운로드 바이트 검증 + FAILED Job 접근 거부 검증 |
+8. **일반 파일이 아닌 대상 조회 시 404 반환** (`test_artifact_download_404_not_regular_file`):
+   - 디렉토리 등 일반 파일이 아닌 대상을 다운로드 하려 할 때 404 예외 확인.
 
-### Unit 2 테스트
+9. **다운로드 시 경로 탈출 차단 403 반환** (`test_artifact_download_403_traversal`):
+   - DB 위조 등으로 다운로드 시점에 `../`가 포함된 경로로 물리 파일 조회를 유도할 때 403 예외 확인.
 
-| 테스트 함수 | 검증 스토리/요구사항 | 내용 |
-|-----------|------------------|------|
-| `test_json_extraction_success` | S-6 | Markdown 코드블록 + Fallback `[…]` JSON 추출 성공 검증 |
-| `test_parser_retryable_exception` | S-6 | JSON 구문 오류 시 `LLMPlanRetryableException` 발생 검증 |
-| `test_parser_validation_exception` | S-6 | 잘못된 action 타입/누락 필드 시 `LLMPlanValidationError` 발생 검증 |
-| `test_security_validator_path_protection` | S-6 | 경로 침투/절대경로/Symlink 차단 + DB SECURITY_ALERT 로그 검증 |
-| `test_security_validator_tool_whitelist` | S-6 | 비인가 Tool(bash 등) 차단 및 openscad 통과 검증 |
+10. **다운로드 시 절대경로 차단 403 반환** (`test_artifact_download_403_absolute`):
+    - DB 내 절대경로 주입 공격 시 물리 분석 단계에서 403 예외 확인.
 
-### Unit 3 테스트
+11. **다운로드 시 prefix-bypass 차단 403 반환** (`test_artifact_download_403_prefix_bypass`):
+    - workspace 가 가령 `/tmp/jobs/job1` 일 때 `../job1_evil/file.txt` 등으로 prefix를 우회하려 할 때 403 예외 확인.
 
-| 테스트 함수 | 검증 NFR/스토리 | 내용 |
-|-----------|--------------|------|
-| `test_argument_validation_blocks_unsafe_chars` | NFR-1.4 | 세미콜론/파이프/달러/공백 등 위험 인자 Allowlist 차단 검증 |
-| `test_argument_validation_allows_safe_args` | NFR-1.4 | OpenSCAD 정상 인자 통과 검증 |
-| `test_run_tool_success_writes_event_logs` | US-3-1, Q2 | 정상 실행 + EventLog CLI_OUTPUT DB 적재 검증 |
-| `test_timeout_kills_process` | NFR-1.1 | 30초 타임아웃 시 process.kill() + CLIExecutionTimeoutError 검증 |
-| `test_timeout_preserves_partial_logs` | Q4 | 타임아웃 후 부분 출력 보존 + TIMEOUT 마커 기록 검증 |
-| `test_launch_retry_on_os_error` | NFR-1.3 | OSError 시 최대 2회 재시도 → CLIExecutionLaunchError 검증 |
-| `test_nonzero_exit_code_raises_cli_execution_error` | US-3-1 | Non-Zero Exit Code 시 CLIExecutionError 발생 검증 |
-| `test_semaphore_limits_concurrency` | NFR-1.2 | Semaphore(2) 동시성 제한 검증 |
-| `test_run_tool_uses_job_workspace_as_cwd` | R-13 | CLI 실행 시 `cwd`가 Job Workspace로 설정되는지 검증 |
-| `test_run_tool_rejects_missing_job_workspace` | R-13 | Job Workspace 디렉토리가 없을 시 실행을 차단하는지 검증 |
-| `test_run_tool_with_subdirectory_output_success` | R-14 | `/tmp` 격리 실행 중 하위 디렉토리를 포함한 결과물 stl이 정상 복사되는지 검증 |
-| `test_run_tool_with_traversal_output_fails` | R-14 | `/tmp` 격리 실행 후 결과물 복사 시 Path Traversal 우회 시도를 차단하는지 검증 |
+12. **다운로드 시 심볼릭 링크 이탈 차단 403 반환** (`test_artifact_download_403_symlink_escape`):
+    - workspace 내부에 샌드박스 외부의 중요 파일(예: `outside_secret.txt`)을 가리키는 symlink를 생성한 뒤 다운로드 시도 시 물리 경로 검증에서 감지 및 403 예외 확인.
 
-### Unit 4 테스트
+13. **절대 서버 경로 유출 차단 검증** (`test_artifact_download_no_server_path_disclosure`):
+    - 에러 메시지에 `/etc/passwd` 등 서버의 물리 절대경로 정보가 유출되지 않고 논리 에러만 출력되는지 확인.
 
-| 테스트 함수 | 검증 NFR/스토리 | 내용 |
-|-----------|--------------|------|
-| `test_job_creation_returns_stream_access` | S-1 | Job 생성 응답의 스트림 접근 정보(url 및 token) 발급 검증 |
-| `test_sse_streaming_completed_job` | US-3-1 | 완료 Job에 대한 실시간 스트림 결과값 및 STREAM_END 전송 검증 |
-| `test_sse_catchup_after_last_event_id` | Q3 | Last-Event-ID 지정 시 누락 이벤트부터 복원(catch-up)하여 전송 검증 |
-| `test_last_event_id_invalid_or_out_of_range_restarts_from_first` | Q3 | Last-Event-ID가 유효하지 않거나 범위 밖인 경우 첫 이벤트부터 재전송 검증 |
-| `test_stream_rejects_missing_job_and_invalid_token` | NFR-4.1 | 잘못된 token 혹은 존재하지 않는 job 접근 시 HTTP 403 / 404 차단 검증 |
-| `test_stream_token_is_job_scoped` | NFR-4.1 | 스트림 토큰이 Job-scoped으로 서로 다른 Job에 사용될 수 없는지 검증 |
-| `test_missing_secret_is_rejected` | NFR-4.1 | SSE_STREAM_TOKEN_SECRET 환경변수가 없을 경우 설정 오류 검증 |
-| `test_connection_registry_rejects_twenty_first_connection` | NFR-4.3 | 동시 21번째 연결에 대해 acquire 거부 (동시 20개 접속 제한) |
-| `test_stream_endpoint_returns_503_at_connection_capacity` | NFR-4.3 | 연결 한계(20개) 도달 시 HTTP 503 반환 및 STREAM_CAPACITY_EXCEEDED 검증 |
-| `test_repository_uses_cursor_order_and_batch_limit` | NFR-4.2 | 이벤트 조회 시 ID 순서 정렬 및 batch 크기 제한(100개) 검증 |
-| `test_stream_emits_reconnect_at_max_duration` | NFR-4.4 | 10분(600초) 이상 세션 유지 시 자동 재연결(STREAM_RECONNECT) 및 연결 해제 검증 |
-| `test_transient_db_error_retries_three_times` | NFR-4.5 | DB 일시적 장애 시 지수 백오프(0.5, 1, 2) 적용하여 최대 3회 재시도 검증 |
-| `test_connection_slot_released_on_error` | NFR-4.6 | 비즈니스 로직 오류 발생 시 스트림 세션 반환 및 STREAM_ERROR 전송 검증 |
-| `test_running_job_terminal_drain` | US-3-1 | 실행 중인 Job이 완료될 때까지 지속 폴링하며 데이터를 보내고 완료 시 STREAM_END 전송 검증 |
-| `test_twenty_streams_average_delivery_under_three_seconds` | NFR-4.7 | 20개 동시 스트림 처리 시 평균 전달 지연 시간이 3초 미만임을 검증 |
-
-### Unit 5 테스트
-
-| 테스트 함수 | 검증 NFR/스토리 | 내용 |
-|-----------|--------------|------|
-| `test_refinement_creates_child_job` | S-5 | 이전 완료 Job 기반 refinement 시 parent_job_id 설정된 CREATED 자식 Job 생성 검증 |
-| `test_refinement_rejects_invalid_parent_or_missing_files` | BR-5-3, BR-5-5 | 부모가 없거나 RUNNING 상태이거나, 혹은 model.scad/design-spec.md가 없는 경우 refinement HTTP 404/409 오류 검증 |
-| `test_refinement_rejects_context_over_five_mb` | BR-5-4 | 부모의 model.scad/design-spec.md 크기 합이 5MB 초과 시 refinement HTTP 413 오류 검증 |
-| `test_refinement_copies_context_and_calls_llm` | S-5 | 자식 Job 실행 시 부모 workspace의 model.scad 및 design-spec.md 상속 및 LLM 컨텍스트 전송, 파싱된 write_file 액션 수행 검증 |
-| `test_job_state_transitions_and_duplicate_execution` | BR-5-7, BR-5-16 | CREATED -> RUNNING -> COMPLETED 전체 상태 전이 및 동일 Job의 중복 실행 시 차단 검증 |
-| `test_llm_retry_classification_and_backoff` | BR-5-9, NFR-5-5 | LLM Client 임시 장애 시 지수 백오프(1초, 2초) 및 최대 2회 재시도 검증 |
-| `test_concurrency_gate_limits_two_jobs_and_times_out_waiter` | NFR-5-2 | 동시 오케스트레이션 실행 2개 제한 및 3번째 요청 시 대기 타임아웃 검증 |
-| `test_endpoint_security_and_secret_validation` | NFR-5-9, NFR-5-10 | 프로덕션 환경의 LLM Endpoint가 HTTPS가 아니거나 Secret이 없을 때 설정 오류 검증 |
-| `test_redirect_and_response_size_are_rejected` | NFR-5-11, NFR-5-4 | LLM 응답 수신 시 redirect 거부 및 5MB 초과 시 response size 제한 에러 검증 |
-| `test_llm_client_uses_120_second_timeout` | NFR-5-1 | HTTP LLMClient의 타임아웃이 120초로 적용되어 동작하는지 검증 |
-| `test_action_failure_preserves_partial_workspace` | R-15C | 액션 수행 중 실패 시 attempt workspace 변경 rollback 및 FAILED 상태 전이 검증 |
-| `test_stale_running_jobs_recovered_at_startup` | NFR-5-7 | lifespan 기동 시 15분 초과 stale RUNNING Job을 FAILED 상태로 자동 복구하고 감사 로그 적재 검증 |
-
----
-
-## 실패 시 조치 방법
-
-```bash
-# 상세 오류 출력으로 재실행
-pytest tests/ -v --tb=long
-
-# 첫 번째 실패에서 중단
-pytest tests/ -x
-
-# 특정 테스트만 격리 실행
-pytest tests/test_unit_3.py::test_timeout_kills_process -v -s
-```
-
----
-
-## R-14 활성 단위 테스트 결과
-
-실행 명령:
-
-```bash
-python -m pytest -v
-```
-
-또는 PYTHONPATH 및 모듈 임포트 방지를 위한 권장 실행 방식:
-
-```bash
-.\venv\Scripts\python -m pytest tests/ -v
-```
-
-| 영역 | 테스트 파일 | 테스트 수 | 결과 |
-| --- | --- | ---: | --- |
-| Unit 1 | `tests/test_unit_1.py` | 4 | Pass |
-| Unit 2 | `tests/test_unit_2.py` | 5 | Pass |
-| Unit 3 | `tests/test_unit_3.py` | 12 | Pass |
-| Unit 4 | `tests/test_unit_4.py` | 16 | Pass |
-| Unit 5 | `tests/test_unit_5.py` | 16 | Pass |
-| Deployment | `tests/test_deployment.py` | 5 | Pass |
-| 합계 | | 58 | 58 passed |
-
-R-14 직접 검증 테스트:
-
-- `test_run_tool_with_subdirectory_output_success` (하위 디렉토리 출력 생성 및 안전한 workspace 동기화 검증)
-- `test_run_tool_with_traversal_output_fails` (임시 격리 디렉토리 내 복사 과정에서의 상위 경로 탈출 시도 방어 검증)
-- `test_compose_defines_expected_services` (Docker Compose에 `db` 및 `app` 서비스가 포함되었는지 정적 검증)
-
-알려진 warning:
-
-- Starlette/httpx deprecation warning
-- 기존 timeout mock에서 생성된 coroutine의 unawaited warning
-- 실패에는 영향을 주지 않지만 후속 테스트 정리 대상으로 기록한다.
-
----
-
-## R-15A/B/C 활성 단위 테스트 결과
-
-실행 명령:
-
-```powershell
-.\venv\Scripts\python.exe -m pytest tests -q --basetemp=.test-tmp\r15-build-test
-```
-
-| 영역 | 테스트 파일 | 테스트 수 | 결과 |
-| --- | --- | ---: | --- |
-| Unit 1 | `tests/test_unit_1.py` | 4 | Pass |
-| R-15A / Unit 2 | `tests/test_unit_2.py` | 19 | Pass |
-| R-15B / Unit 3 | `tests/test_unit_3.py` | 14 | Pass |
-| Unit 4 | `tests/test_unit_4.py` | 16 | Pass |
-| R-15C / Unit 5 | `tests/test_unit_5.py` | 21 | Pass |
-| Deployment | `tests/test_deployment.py` | 5 | Pass |
-| 합계 | | 79 | 79 passed |
-
-직접 검증 근거:
-
-- R-15A: comment/string masking false-positive 방지, 원본 line number, bounded feedback 테스트
-- R-15B: concurrent stdout/stderr drain, 모든 line EventLog 저장, bounded tail 및 Rule ID diagnostics 테스트
-- R-15C: current-attempt-only feedback, 실패 rollback, artifact 비승격, 최종 plan 저장 순서 및 exhausted retry 테스트
+## 결과 확인 및 트러블슈팅
+- **기대 결과**: 모든 테스트 케이스가 통과해야 합니다. (기존 R-15 테스트 및 전체 92개 테스트 통과 보장)
+- 테스트 실패 시, `tests/test_unit_2.py` 및 관련 코드(`jobs/service.py`)의 구현 상태를 로그를 기반으로 분석하고 수정하십시오.

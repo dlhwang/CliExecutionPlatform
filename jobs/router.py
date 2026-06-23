@@ -185,3 +185,46 @@ def download_artifact(
                 "message": f"Artifact {filename} not found for Job {job_id}."
             }
         )
+
+
+router_artifacts = APIRouter(prefix="/api/v1/artifacts", tags=["artifacts"])
+
+@router_artifacts.get(
+    "/{artifact_id}/download",
+    summary="Artifact ID 기반 보안 다운로드"
+)
+def download_artifact_by_id(
+    artifact_id: UUID,
+    db: Session = Depends(get_db),
+    storage_service: StorageService = Depends(get_storage_service)
+):
+    from jobs.service import ArtifactService, ArtifactNotFoundError, ArtifactPermissionError
+    
+    artifact_service = ArtifactService(db, storage_service)
+    try:
+        file_path, content_type, filename = artifact_service.get_artifact_for_download(artifact_id)
+        
+        return FileResponse(
+            path=str(file_path),
+            filename=filename,
+            media_type=content_type
+        )
+    except ArtifactNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "status": "error",
+                "code": "NOT_FOUND",
+                "message": "Artifact not found."
+            }
+        ) from exc
+    except ArtifactPermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "status": "error",
+                "code": "FORBIDDEN_ACCESS",
+                "message": "Access denied."
+            }
+        ) from exc
+

@@ -1,7 +1,9 @@
+import mimetypes
+from pathlib import PurePosixPath, Path
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import Optional, List
-from jobs.models import Job, EventLog
+from jobs.models import Job, EventLog, Artifact
 from storage.interface import StorageService
 
 MAX_REFINEMENT_CONTEXT_BYTES = 5 * 1024 * 1024
@@ -84,3 +86,92 @@ class JobService:
         특정 Job과 연관된 전체 이벤트 로그 목록을 ID 오름차순(시간순)으로 조회합니다.
         """
         return self.db.query(EventLog).filter(EventLog.job_id == job_id).order_by(EventLog.id).all()
+
+
+class ArtifactNotFoundError(Exception):
+    pass
+
+
+class ArtifactPermissionError(Exception):
+    pass
+
+
+class ArtifactService:
+    def __init__(self, db: Session, storage_service: StorageService):
+        self.db = db
+        self.storage_service = storage_service
+
+    def register_artifact(self, job_id: UUID, relative_path: str) -> Artifact:
+        # 1. 논리 검증
+        if not relative_path or not relative_path.strip():
+            raise ArtifactPermissionError("Access Denied: Empty path is not allowed.")
+        if "\\" in relative_path:
+            raise ArtifactPermissionError("Access Denied: Windows backslashes are not allowed.")
+        
+        posix_path = PurePosixPath(relative_path)
+        if posix_path.is_absolute():
+            raise ArtifactPermissionError("Access Denied: Absolute paths are not allowed.")
+            
+        segments = relative_path.replace("\\", "/").split("/")
+        if any(s in (".", "..") or not s for s in segments):
+            raise ArtifactPermissionError("Access Denied: Invalid path segments (., .. or empty) are not allowed.")
+                
+        # 2. 물리 검증
+        base_dir = getattr(self.storage_service, "base_dir", Path(__file__).parent.parent.resolve() / ".workspaces")
+        base_job_dir = (base_dir / "jobs" / str(job_id)).resolve()
+        target_path = (base_job_dir / relative_path).resolve()
+        
+        if not target_path.is_relative_to(base_job_dir):
+            raise ArtifactPermissionError("Access Denied: Path traversal attempt detected.")
+
+        # 3. 메타데이터 세팅 및 저장
+        filename = posix_path.name  # basename에서만 파생
+        content_type, _ = mimetypes.guess_type(filename)
+        if not content_type:
+            content_type = "application/octet-stream"
+
+        artifact = Artifact(
+            job_id=job_id,
+            relative_path=relative_path,
+            filename=filename,
+            content_type=content_type
+        )
+        self.db.add(artifact)
+        self.db.flush()  # DB ID 생성을 위해 flush
+        return artifact
+
+    def get_artifact_for_download(self, artifact_id: UUID) -> tuple[Path, str, str]:
+        # 1. DB 조회
+        artifact = self.db.query(Artifact).filter(Artifact.id == artifact_id).first()
+        if not artifact:
+            raise ArtifactNotFoundError("Artifact not found in database.")
+
+        # 2. 논리 검증
+        relative_path = artifact.relative_path
+        if not relative_path or not relative_path.strip():
+            raise ArtifactPermissionError("Access Denied: Empty path is not allowed.")
+        if "\\" in relative_path:
+            raise ArtifactPermissionError("Access Denied: Windows backslashes are not allowed.")
+        
+        posix_path = PurePosixPath(relative_path)
+        if posix_path.is_absolute():
+            raise ArtifactPermissionError("Access Denied: Absolute paths are not allowed.")
+            
+        segments = relative_path.replace("\\", "/").split("/")
+        if any(s in (".", "..") or not s for s in segments):
+            raise ArtifactPermissionError("Access Denied: Invalid path segments (., .. or empty) are not allowed.")
+
+        # 3. 물리 검증
+        base_dir = getattr(self.storage_service, "base_dir", Path(__file__).parent.parent.resolve() / ".workspaces")
+        base_job_dir = (base_dir / "jobs" / str(artifact.job_id)).resolve()
+        target_path = (base_job_dir / relative_path).resolve()
+
+        if not target_path.is_relative_to(base_job_dir):
+            raise ArtifactPermissionError("Access Denied: Path traversal attempt detected.")
+
+        # 4. 파일 존재 여부 및 일반 파일 여부 확인
+        if not target_path.exists() or not target_path.is_file():
+            raise ArtifactNotFoundError("Physical file not found or is not a regular file.")
+
+        return target_path, artifact.content_type, artifact.filename
+

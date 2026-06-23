@@ -11,7 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from database import engine, Base, SessionLocal
 from limiter import limiter
-from jobs.router import router as jobs_router
+from jobs.router import router as jobs_router, router_artifacts
 from sse.router import router as sse_router
 from llm.client import HttpLLMClient
 from llm.parser import ActionPlanParser
@@ -169,6 +169,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 # 라우터 등록
 # -------------------------------------------------------------------
 app.include_router(jobs_router)
+app.include_router(router_artifacts)
 app.include_router(sse_router)
 
 @app.get("/")

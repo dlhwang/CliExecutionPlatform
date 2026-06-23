@@ -429,3 +429,256 @@ def test_scad_validation_feedback_is_bounded():
     
     # 4. snippet 150자 초과 시 truncate 되어 '...'이 붙어 있어야 한다.
     assert "..." in msg
+
+
+def test_artifact_registration_accepts_valid_paths(db_session, test_storage):
+    from jobs.service import ArtifactService
+    job_id = uuid.uuid4()
+    job = Job(id=job_id, prompt="Test prompt", status="RUNNING")
+    db_session.add(job)
+    db_session.commit()
+
+    test_storage.create_workspace(job_id)
+    test_storage.write_file(job_id, "models/model.scad", "cube([10, 20, 30]);")
+
+    artifact_service = ArtifactService(db_session, test_storage)
+    artifact = artifact_service.register_artifact(job_id, "models/model.scad")
+    
+    assert artifact.job_id == job_id
+    assert artifact.relative_path == "models/model.scad"
+    assert artifact.filename == "model.scad"
+    assert "scad" in artifact.content_type or "octet-stream" in artifact.content_type
+
+
+def test_artifact_registration_rejects_absolute_paths(db_session, test_storage):
+    from jobs.service import ArtifactService, ArtifactPermissionError
+    job_id = uuid.uuid4()
+    job = Job(id=job_id, prompt="Test prompt", status="RUNNING")
+    db_session.add(job)
+    db_session.commit()
+
+    artifact_service = ArtifactService(db_session, test_storage)
+    with pytest.raises(ArtifactPermissionError) as exc_info:
+        artifact_service.register_artifact(job_id, "/etc/passwd")
+    assert "Absolute paths are not allowed" in str(exc_info.value)
+
+
+def test_artifact_registration_rejects_traversal_segments(db_session, test_storage):
+    from jobs.service import ArtifactService, ArtifactPermissionError
+    job_id = uuid.uuid4()
+    job = Job(id=job_id, prompt="Test prompt", status="RUNNING")
+    db_session.add(job)
+    db_session.commit()
+
+    artifact_service = ArtifactService(db_session, test_storage)
+    for path in ("../file.txt", "dir/../../file.txt", "dir/./file.txt", "dir//file.txt"):
+        with pytest.raises(ArtifactPermissionError) as exc_info:
+            artifact_service.register_artifact(job_id, path)
+        assert "Invalid path segments" in str(exc_info.value) or "Empty path" in str(exc_info.value)
+
+
+def test_artifact_registration_rejects_windows_backslash(db_session, test_storage):
+    from jobs.service import ArtifactService, ArtifactPermissionError
+    job_id = uuid.uuid4()
+    job = Job(id=job_id, prompt="Test prompt", status="RUNNING")
+    db_session.add(job)
+    db_session.commit()
+
+    artifact_service = ArtifactService(db_session, test_storage)
+    with pytest.raises(ArtifactPermissionError) as exc_info:
+        artifact_service.register_artifact(job_id, "models\\model.scad")
+    assert "Windows backslashes are not allowed" in str(exc_info.value)
+
+
+def test_artifact_download_success(db_session, test_storage):
+    from jobs.service import ArtifactService
+    job_id = uuid.uuid4()
+    job = Job(id=job_id, prompt="Test prompt", status="RUNNING")
+    db_session.add(job)
+    db_session.commit()
+
+    test_storage.create_workspace(job_id)
+    test_storage.write_file(job_id, "output.stl", "stl content")
+
+    artifact_service = ArtifactService(db_session, test_storage)
+    artifact = artifact_service.register_artifact(job_id, "output.stl")
+    db_session.commit()
+
+    file_path, content_type, filename = artifact_service.get_artifact_for_download(artifact.id)
+    assert file_path.exists()
+    assert filename == "output.stl"
+    assert content_type == "application/octet-stream" or "sla" in content_type
+
+
+def test_artifact_download_404_unknown_id(db_session, test_storage):
+    from jobs.service import ArtifactService, ArtifactNotFoundError
+    artifact_service = ArtifactService(db_session, test_storage)
+    with pytest.raises(ArtifactNotFoundError) as exc_info:
+        artifact_service.get_artifact_for_download(uuid.uuid4())
+    assert "Artifact not found" in str(exc_info.value)
+
+
+def test_artifact_download_404_missing_physical_file(db_session, test_storage):
+    from jobs.service import ArtifactService, ArtifactNotFoundError
+    job_id = uuid.uuid4()
+    job = Job(id=job_id, prompt="Test prompt", status="RUNNING")
+    db_session.add(job)
+    db_session.commit()
+
+    artifact_service = ArtifactService(db_session, test_storage)
+    artifact = artifact_service.register_artifact(job_id, "missing.png")
+    db_session.commit()
+
+    with pytest.raises(ArtifactNotFoundError) as exc_info:
+        artifact_service.get_artifact_for_download(artifact.id)
+    assert "Physical file not found" in str(exc_info.value)
+
+
+def test_artifact_download_404_not_regular_file(db_session, test_storage):
+    from jobs.service import ArtifactService, ArtifactNotFoundError
+    job_id = uuid.uuid4()
+    job = Job(id=job_id, prompt="Test prompt", status="RUNNING")
+    db_session.add(job)
+    db_session.commit()
+
+    test_storage.create_workspace(job_id)
+    test_storage.create_directory(job_id, "sub_dir")
+
+    artifact_service = ArtifactService(db_session, test_storage)
+    # 물리적 검증을 위해 artifacts로 우회 등록 대신 register_artifact를 사용합니다.
+    # 단, register_artifact 시점에는 물리 디렉토리가 workspace root 하위에 실제로 존재해야 resolve가 가능합니다.
+    artifact = artifact_service.register_artifact(job_id, "sub_dir")
+    db_session.commit()
+
+    with pytest.raises(ArtifactNotFoundError) as exc_info:
+        artifact_service.get_artifact_for_download(artifact.id)
+    assert "not a regular file" in str(exc_info.value)
+
+
+def test_artifact_download_403_traversal(db_session, test_storage):
+    from jobs.service import ArtifactService, ArtifactPermissionError
+    from jobs.models import Artifact
+    job_id = uuid.uuid4()
+    job = Job(id=job_id, prompt="Test prompt", status="RUNNING")
+    db_session.add(job)
+    db_session.commit()
+
+    # DB에 traversal 경로가 주입된 것으로 모의
+    artifact = Artifact(
+        job_id=job_id,
+        relative_path="dir/../../file.txt",
+        filename="file.txt",
+        content_type="text/plain"
+    )
+    db_session.add(artifact)
+    db_session.commit()
+
+    artifact_service = ArtifactService(db_session, test_storage)
+    with pytest.raises(ArtifactPermissionError) as exc_info:
+        artifact_service.get_artifact_for_download(artifact.id)
+    assert "Invalid path segments" in str(exc_info.value)
+
+
+def test_artifact_download_403_absolute(db_session, test_storage):
+    from jobs.service import ArtifactService, ArtifactPermissionError
+    from jobs.models import Artifact
+    job_id = uuid.uuid4()
+    job = Job(id=job_id, prompt="Test prompt", status="RUNNING")
+    db_session.add(job)
+    db_session.commit()
+
+    artifact = Artifact(
+        job_id=job_id,
+        relative_path="/absolute/path/file.txt",
+        filename="file.txt",
+        content_type="text/plain"
+    )
+    db_session.add(artifact)
+    db_session.commit()
+
+    artifact_service = ArtifactService(db_session, test_storage)
+    with pytest.raises(ArtifactPermissionError) as exc_info:
+        artifact_service.get_artifact_for_download(artifact.id)
+    assert "Absolute paths are not allowed" in str(exc_info.value)
+
+
+def test_artifact_download_403_prefix_bypass(db_session, test_storage):
+    from jobs.service import ArtifactService, ArtifactPermissionError
+    from jobs.models import Artifact
+    job_id = uuid.uuid4()
+    job = Job(id=job_id, prompt="Test prompt", status="RUNNING")
+    db_session.add(job)
+    db_session.commit()
+
+    artifact = Artifact(
+        job_id=job_id,
+        relative_path=f"../{job_id}_evil/file.txt",
+        filename="file.txt",
+        content_type="text/plain"
+    )
+    db_session.add(artifact)
+    db_session.commit()
+
+    artifact_service = ArtifactService(db_session, test_storage)
+    with pytest.raises(ArtifactPermissionError) as exc_info:
+        artifact_service.get_artifact_for_download(artifact.id)
+    assert "Invalid path segments" in str(exc_info.value)
+
+
+def test_artifact_download_403_symlink_escape(db_session, test_storage):
+    from jobs.service import ArtifactService, ArtifactPermissionError
+    from jobs.models import Artifact
+    job_id = uuid.uuid4()
+    job = Job(id=job_id, prompt="Test prompt", status="RUNNING")
+    db_session.add(job)
+    db_session.commit()
+
+    test_storage.create_workspace(job_id)
+    jobs_dir = test_storage.base_dir / "jobs" / str(job_id)
+    
+    # 샌드박스 밖의 파일
+    outside_file = test_storage.base_dir / "outside_secret.txt"
+    outside_file.write_text("secret info")
+    
+    symlink_path = jobs_dir / "secret_symlink.txt"
+    try:
+        symlink_path.symlink_to(outside_file)
+    except OSError:
+        pytest.skip("Symlink creation not allowed in this environment")
+
+    # DB에는 relative_path="secret_symlink.txt" 로 정상적인 상대경로처럼 등록
+    artifact = Artifact(
+        job_id=job_id,
+        relative_path="secret_symlink.txt",
+        filename="secret_symlink.txt",
+        content_type="text/plain"
+    )
+    db_session.add(artifact)
+    db_session.commit()
+
+    artifact_service = ArtifactService(db_session, test_storage)
+    with pytest.raises(ArtifactPermissionError) as exc_info:
+        artifact_service.get_artifact_for_download(artifact.id)
+    assert "Path traversal attempt detected" in str(exc_info.value)
+
+
+def test_artifact_download_no_server_path_disclosure(db_session, test_storage):
+    from jobs.service import ArtifactService, ArtifactPermissionError
+    job_id = uuid.uuid4()
+    job = Job(id=job_id, prompt="Test prompt", status="RUNNING")
+    db_session.add(job)
+    db_session.commit()
+
+    artifact_service = ArtifactService(db_session, test_storage)
+    
+    # 1. 403 예외 메시지 절대경로 차단 검증
+    with pytest.raises(ArtifactPermissionError) as exc_info:
+        artifact_service.register_artifact(job_id, "/etc/passwd")
+    err_msg = str(exc_info.value)
+    assert "etc" not in err_msg
+    assert "passwd" not in err_msg
+    # 절대경로 조각이 직접 유출되지 않는지 확인
+    assert "etc/passwd" not in err_msg
+    assert "etc\\passwd" not in err_msg
+
+

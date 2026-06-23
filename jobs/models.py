@@ -40,6 +40,9 @@ class Job(Base):
     logs: Mapped[List["EventLog"]] = relationship(
         "EventLog", back_populates="job", cascade="all, delete-orphan"
     )
+    artifacts: Mapped[List["Artifact"]] = relationship(
+        "Artifact", back_populates="job", cascade="all, delete-orphan"
+    )
     parent: Mapped[Optional["Job"]] = relationship(
         "Job", remote_side=[id], back_populates="children"
     )
@@ -71,3 +74,27 @@ class EventLog(Base):
 
 # idx_event_logs_job_id_id 결합 인덱스 추가 (특정 Job의 로그를 ID 순서대로 고속 조회 및 Polling 하기 위함)
 Index("idx_event_logs_job_id_id", EventLog.job_id, EventLog.id)
+
+
+class Artifact(Base):
+    """
+    고유 artifact_id 기반의 다운로드를 지원하기 위해 생성된 아티팩트 메타데이터를 저장하는 ORM 모델.
+    """
+    __tablename__ = "artifacts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid7
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    relative_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    # N대1 관계 매핑
+    job: Mapped["Job"] = relationship("Job", back_populates="artifacts")
+

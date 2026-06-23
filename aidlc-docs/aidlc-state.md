@@ -3,7 +3,7 @@
 ## Project Information
 - **Project Type**: Brownfield (Hotfix Mode)
 - **Start Date**: 2026-06-18T16:09:24+09:00
-- **Current Stage**: CONSTRUCTION - Code Generation
+- **Current Stage**: OPERATIONS - R-16 Complete
 
 ## Extension Configuration
 | Extension | Enabled | Decided At |
@@ -12,7 +12,7 @@
 | Property-Based Testing | No | Requirements Analysis |
 
 ## Execution Plan Summary
-- **Current Hotfix**: R-15 OpenSCAD 생성 제약 강화 및 SCAD 정적 검증기 추가
+- **Current Feature**: R-16 보안 아티팩트 다운로드 엔드포인트
 - **Stages to Execute**: Requirements Analysis, Workflow Planning, Code Generation, Build and Test, Operations
 - **Stages to Skip**: Reverse Engineering, User Stories, Application Design, Units Generation, Functional Design, NFR Requirements, NFR Design, Infrastructure Design
 
@@ -147,9 +147,20 @@
 - [x] Build and Test (Completed: 2026-06-22T16:58:39+09:00, 79 tests passed)
 - [x] Operations - PLACEHOLDER (Completed: 2026-06-22T17:00:05+09:00)
 
+### FEATURE R-16 (보안 Artifact 다운로드 엔드포인트)
+- [x] Workspace Detection (Completed: 2026-06-22T17:17:13+09:00)
+- [x] Reverse Engineering - SKIP: 기존 요구사항·애플리케이션 설계·단위 문서와 완료 상태가 현재 구조를 설명함
+- [x] Requirements Analysis (Approved: 2026-06-22T17:29:49+09:00)
+- [x] User Stories (Completed: 2026-06-23T08:57:35+09:00)
+- [x] Workflow Planning (Completed: 2026-06-23T09:03:49+09:00)
+- [x] Code Generation (Completed: 2026-06-23T10:06:34+09:00)
+- [x] Build and Test (Completed: 2026-06-23T10:11:00+09:00, 92 tests passed)
+- [x] Operations - PLACEHOLDER (Completed: 2026-06-23T10:15:00+09:00)
+
 ## Current Status
-- **Lifecycle Phase**: COMPLETE
-- **Current Stage**: R-15A/B/C Lifecycle Complete
-- **Next Stage**: 운영 환경 Docker/OpenSCAD acceptance smoke
+- **Lifecycle Phase**: OPERATIONS
+- **Current Stage**: Completed
+- **Next Stage**: N/A
 
 - **R-15A/B/C Completion Note**: 2026-06-22T17:00:05+09:00 전체 79개 테스트와 Python compileall이 통과했습니다. Docker CLI 부재로 실제 container acceptance smoke는 N/A이며 운영 배포 전 조건으로 남습니다.
+- **R-16 Completion Note**: 2026-06-23T10:15:00+09:00 전체 92개 테스트가 성공적으로 통과하고 빌드 및 테스트 지침서(build-instructions.md, unit-test-instructions.md, integration-test-instructions.md, performance-test-instructions.md, security-test-instructions.md, build-and-test-summary.md)가 작성 완료되었으며, 사용자의 최종 승인을 받아 R-16 아티팩트 다운로드 기능 추가 라이프사이클이 완결되었습니다.
