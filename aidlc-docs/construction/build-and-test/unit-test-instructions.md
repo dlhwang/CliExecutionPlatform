@@ -1,6 +1,6 @@
 # 유닛 테스트 실행 지침 (Unit Test Execution Instructions)
 
-본 지침은 CLI-Execution-Platform 프로젝트의 유닛 테스트 구성 및 실행 방법을 설명합니다. 특히 R-16(보안 아티팩트 다운로드 API) 개발과 관련된 핵심 테스트 케이스의 검증 방식을 서술합니다.
+본 지침은 CLI-Execution-Platform 프로젝트의 유닛 테스트 구성 및 실행 방법을 설명합니다. 특히 R-16(보안 아티팩트 다운로드 API) 및 R-17(Job ID 기반 아티팩트 목록 조회 API) 개발과 관련된 핵심 테스트 케이스의 검증 방식을 서술합니다.
 
 ## 테스트 실행 환경
 - **테스트 러너**: `pytest`
@@ -20,7 +20,7 @@ export PYTHONPATH="."
 pytest
 ```
 
-### 2. 특정 테스트 모듈만 단독 실행 (R-16 아티팩트 검증 위주)
+### 2. 특정 테스트 모듈만 단독 실행 (R-16/R-17 아티팩트 검증 위주)
 ```bash
 # Windows PowerShell
 $env:PYTHONPATH="."
@@ -70,6 +70,19 @@ venv\Scripts\pytest tests/test_unit_2.py
 13. **절대 서버 경로 유출 차단 검증** (`test_artifact_download_no_server_path_disclosure`):
     - 에러 메시지에 `/etc/passwd` 등 서버의 물리 절대경로 정보가 유출되지 않고 논리 에러만 출력되는지 확인.
 
+## R-17 관련 핵심 유닛 테스트 케이스 목록
+
+`tests/test_unit_2.py`에 추가된 R-17 아티팩트 목록 조회 검증 테스트는 다음과 같습니다:
+
+1. **성공적인 아티팩트 목록 조회 검증** (`test_get_artifacts_success`):
+   - 완료(COMPLETED) 상태인 Job에 연계된 아티팩트가 있을 때 목록을 조회하면 200 OK와 함께 목록을 정상 반환하고, 보안상 물리적 정보가 포함된 `relative_path` 필드가 차단(제외)되었는지 검증합니다.
+
+2. **존재하지 않는 Job ID 조회 시 404 반환** (`test_get_artifacts_not_found`):
+   - 존재하지 않는 임의의 `job_id`로 목록을 조회할 시 HTTP 404 Not Found 및 `NOT_FOUND` 비즈니스 코드가 반환되는지 검증합니다.
+
+3. **완료 상태가 아닌 Job 조회 시 400 반환** (`test_get_artifacts_not_completed`):
+   - Job 상태가 `CREATED`, `RUNNING`, `FAILED` 인 경우 아티팩트 조회를 거부하고 HTTP 400 Bad Request 및 `BAD_REQUEST` 비즈니스 코드가 반환되는지 검증합니다.
+
 ## 결과 확인 및 트러블슈팅
-- **기대 결과**: 모든 테스트 케이스가 통과해야 합니다. (기존 R-15 테스트 및 전체 92개 테스트 통과 보장)
-- 테스트 실패 시, `tests/test_unit_2.py` 및 관련 코드(`jobs/service.py`)의 구현 상태를 로그를 기반으로 분석하고 수정하십시오.
+- **기대 결과**: 모든 테스트 케이스가 통과해야 합니다. (기존 R-15/R-16 테스트를 포함한 전체 95개 테스트 통과 보장)
+- 테스트 실패 시, `tests/test_unit_2.py` 및 관련 코드(`jobs/router.py`, `jobs/service.py`)의 구현 상태를 로그를 기반으로 분석하고 수정하십시오.

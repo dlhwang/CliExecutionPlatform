@@ -175,3 +175,6 @@ class ArtifactService:
 
         return target_path, artifact.content_type, artifact.filename
 
+    def get_artifacts_by_job_id(self, job_id: UUID) -> List[Artifact]:
+        return self.db.query(Artifact).filter(Artifact.job_id == job_id).all()
+

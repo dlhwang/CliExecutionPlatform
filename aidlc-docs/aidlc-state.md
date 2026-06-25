@@ -3,7 +3,7 @@
 ## Project Information
 - **Project Type**: Brownfield (Hotfix Mode)
 - **Start Date**: 2026-06-18T16:09:24+09:00
-- **Current Stage**: OPERATIONS - R-16 Complete
+- **Current Stage**: INCEPTION - Workflow Planning Complete
 
 ## Extension Configuration
 | Extension | Enabled | Decided At |
@@ -12,9 +12,9 @@
 | Property-Based Testing | No | Requirements Analysis |
 
 ## Execution Plan Summary
-- **Current Feature**: R-16 보안 아티팩트 다운로드 엔드포인트
-- **Stages to Execute**: Requirements Analysis, Workflow Planning, Code Generation, Build and Test, Operations
-- **Stages to Skip**: Reverse Engineering, User Stories, Application Design, Units Generation, Functional Design, NFR Requirements, NFR Design, Infrastructure Design
+- **Current Feature**: FEATURE R-18 (AI-MAKING 워크플로우 기반 multi-turn SCAD 생성 기능 설계)
+- **Stages to Execute**: Requirements Analysis, Workflow Planning, Application Design, Units Generation, Functional Design
+- **Stages to Skip**: Reverse Engineering, User Stories, NFR Requirements, NFR Design, Infrastructure Design, Code Generation, Build and Test, Operations
 
 ## Stage Progress
 
@@ -157,10 +157,29 @@
 - [x] Build and Test (Completed: 2026-06-23T10:11:00+09:00, 92 tests passed)
 - [x] Operations - PLACEHOLDER (Completed: 2026-06-23T10:15:00+09:00)
 
+### FEATURE R-17 (Job ID 기반 아티팩트 목록 조회 엔드포인트)
+- [x] Workspace Detection (Completed: 2026-06-25T16:38:43+09:00)
+- [x] Reverse Engineering - SKIP: 기존 역공학 산출물이 현 구조를 설명함
+- [x] Requirements Analysis (Approved: 2026-06-25T16:42:36+09:00)
+- [x] User Stories - SKIP: 단순 API 엔드포인트 조회 기능으로 사용자 여정 기획 생략
+- [x] Workflow Planning (Completed: 2026-06-25T16:44:37+09:00)
+- [x] Code Generation (Completed: 2026-06-25T16:49:28+09:00)
+- [x] Build and Test (Completed: 2026-06-25T16:50:45+09:00, 95 tests passed)
+- [x] Operations - PLACEHOLDER (Completed: 2026-06-25T16:50:45+09:00)
+
+### FEATURE R-18 (AI-MAKING 워크플로우 기반 multi-turn SCAD 생성 기능 설계)
+- [x] Workspace Detection (Completed: 2026-06-25T17:01:11+09:00)
+- [x] Requirements Analysis (Completed: 2026-06-25T17:07:00+09:00)
+- [x] Workflow Planning (Completed: 2026-06-25T17:13:00+09:00)
+- [ ] Application Design
+- [ ] Units Generation
+- [ ] Functional Design
+
 ## Current Status
-- **Lifecycle Phase**: OPERATIONS
-- **Current Stage**: Completed
-- **Next Stage**: N/A
+- **Lifecycle Phase**: INCEPTION
+- **Current Stage**: Application Design
+- **Next Stage**: Application Design
 
 - **R-15A/B/C Completion Note**: 2026-06-22T17:00:05+09:00 전체 79개 테스트와 Python compileall이 통과했습니다. Docker CLI 부재로 실제 container acceptance smoke는 N/A이며 운영 배포 전 조건으로 남습니다.
 - **R-16 Completion Note**: 2026-06-23T10:15:00+09:00 전체 92개 테스트가 성공적으로 통과하고 빌드 및 테스트 지침서(build-instructions.md, unit-test-instructions.md, integration-test-instructions.md, performance-test-instructions.md, security-test-instructions.md, build-and-test-summary.md)가 작성 완료되었으며, 사용자의 최종 승인을 받아 R-16 아티팩트 다운로드 기능 추가 라이프사이클이 완결되었습니다.
+- **R-17 Completion Note**: 2026-06-25T16:50:45+09:00 전체 95개 테스트(신규 R-17 검증 3개 포함)가 통과하였습니다. Job ID 기반의 안전한 아티팩트 목록 조회 API(GET /api/v1/jobs/{job_id}/artifacts) 추가가 완료되었으며, 사용자 최종 승인을 획득하여 R-17 라이프사이클이 완결되었습니다.

@@ -39,3 +39,12 @@ class ErrorDetail(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: ErrorDetail
+
+
+class ArtifactListResponse(BaseModel):
+    id: UUID
+    filename: str
+    content_type: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

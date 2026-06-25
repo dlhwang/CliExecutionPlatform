@@ -2646,4 +2646,203 @@ D:\workspace\CLI-Execution-Platform\aidlc-docs\construction\hotfix-r15-runtime-r
 **Context**: Git Commit Message Recommendation for Feature R-16.
 
 ---
+## Interaction - R-16 Sequence Diagram Request
+**Timestamp**: 2026-06-25T15:17:15+09:00
+**User Input**: 
+```text
+# AGENTS.md instructions for D:\workspace\CLI-Execution-Platform
+
+<INSTRUCTIONS>
+# AGENTS.md
+
+이 프로젝트에서 작동하는 모든 AI 에이전트는 작업을 시작하기 전과 수행하는 도중에 다음 지침을 반드시 준수해야 합니다.
+
+1. **최우선 필수 지침**:
+   - 작업을 진행하기 전에 항상 `aidlc-rules/core-workflow.md` 파일을 가장 먼저 읽고 그 안에 정의된 AI-DLC(AI Software Development Lifecycle) 워크플로우 규칙을 완전히 숙지하고 준수해야 합니다.
+   
+2. **워크플로우 단계별 준수**:
+   - `core-workflow.md`에 명시된 단계(Workspace Detection, Requirements Analysis, Workflow Planning 등)를 순차적으로 밟아가며 진행하십시오.
+   - 각 단계가 끝날 때마다 명시된 완료 메시지 포맷을 준수하고, 사용자로부터 명시적인 승인(Explicit Approval)을 얻은 후에 다음 단계로 넘어가야 합니다.
+   
+3. **감사 로그(Audit Log) 기록**:
+   - 모든 사용자 입력과 에이전트의 응답은 `aidlc-docs/audit.md`에 타임스탬프(ISO 8601 포맷)와 함께 완벽히 기록되어야 합니다.
+   - 사용자 입력을 요약하거나 생략하지 말고, 제공된 그대로 원본을 기록하십시오.
+   - `audit.md`를 편집할 때는 기존 내용을 덮어쓰지 말고 반드시 내용을 추가(Append)하십시오.
+
+4. **문서 작성 언어**:
+   - AI-DLC 산출물 및 개발 관련 문서는 달리 명시되지 않는 한 **한국어**로 작성하십시오.
+
+5. **문서 작성**:
+   - 모든 파일 읽기 및 쓰기는 UTF-8(BOM 없음)으로 수행할 것
+
+</INSTRUCTIONS><environment_context>
+  <cwd>D:\workspace\CLI-Execution-Platform</cwd>
+  <shell>powershell</shell>
+  <current_date>2026-06-25</current_date>
+  <timezone>Asia/Seoul</timezone>
+  <filesystem><workspace_roots><root>D:\workspace\CLI-Execution-Platform</root></workspace_roots><permission_profile type="managed"><file_system type="restricted"><entry access="read"><special>:root</special></entry><entry access="write"><path>D:\workspace\CLI-Execution-Platform</path></entry><entry access="write"><special>:slash_tmp</special></entry><entry access="write"><special>:tmpdir</special></entry><entry access="read"><path>D:\workspace\CLI-Execution-Platform\.git</path></entry><entry access="read"><path>D:\workspace\CLI-Execution-Platform\.agents</path></entry><entry access="read"><path>D:\workspace\CLI-Execution-Platform\.codex</path></entry></file_system></permission_profile></filesystem>
+</environment_context>
+이거 시퀀스 다이어 그램으로 이 서비스의 주요 로직을 표현해봐
+```
+**AI Response**: "AGENTS 지침에 따라 core-workflow.md와 공통 규칙을 먼저 확인하고, R-16 구현 코드(main.py, jobs/router.py, jobs/service.py, jobs/models.py, orchestrator/actions.py, storage/local.py)를 읽어 Artifact 등록 및 다운로드 주요 로직을 Mermaid 시퀀스 다이어그램으로 정리했다."
+**Context**: R-16 완료 상태에서 구현된 secure artifact download service의 주요 로직 설명. Extension Configuration에서 Security Baseline 및 Property-Based Testing은 disabled 상태이므로 별도 확장 규칙 적용은 생략했다.
+
+---
+## Interaction - R-16 Remaining Work Check
+**Timestamp**: 2026-06-25T15:18:48+09:00
+**User Input**: "R-16 남은 게 있어?"
+**AI Response**: "R-16 상태 문서와 build-and-test 요약, code generation plan을 확인했다. 문서 기준 R-16은 Operations까지 완료되었고 92/92 tests passed로 기록되어 남은 필수 AI-DLC 단계는 없다. 다만 실제 최신 워크트리 기준 재검증은 사용자가 원하면 pytest를 다시 실행해 확인할 수 있다."
+**Context**: R-16 완료 여부 확인. `aidlc-state.md`, `build-and-test-summary.md`, R-16 code generation plan 기준으로 판단.
+
+---
+## Interaction - R-16 Frontend API Handoff
+**Timestamp**: 2026-06-25T15:25:22+09:00
+**User Input**: "R-16에서 만든 API 가 뭐냐 알려줭 Front한테 던저서 붙혀보게"
+**AI Response**: "R-16에서 추가된 API는 `GET /api/v1/artifacts/{artifact_id}/download`이며, path 또는 filename을 클라이언트에서 받지 않고 artifact_id만 받는 파일 다운로드 엔드포인트다. 성공 시 FileResponse로 원본 Content-Type과 Content-Disposition filename을 반환하고, unknown/missing/non-file은 404, traversal/absolute/prefix-bypass 등 보안 차단은 403을 반환한다고 프론트 전달용 계약을 정리했다."
+**Context**: R-16 secure artifact download endpoint API handoff. 확인 파일: `jobs/router.py`, `main.py`.
+
+---
+
+## FEATURE R-17 Artifact List Retrieval Request
+**Timestamp**: 2026-06-25T16:38:43+09:00
+**User Input**: """
+aidlc-rules\core-workflow.md 읽고 시작해봐
+프론트에서 job을 시작하고 jobID을 이용해서 sse로 job에 따른 상태를 스트림으로 받고있어
+완료를 받으면, 프론트에서 그 결과물을 다운로드 받고 싶은디 그게 job에 어떤 aritifact가 생겼는지 모르니께
+다운로드 API는 aritifactID가 필요해고 그래서 API하나가 더 필요한듯
+"""
+**AI Response**: "AI-DLC 규칙에 따라 core-workflow.md를 우선 로드하고, 신규 요구사항인 Job ID 기반 아티팩트 목록 조회 API 개발을 위한 Workspace Detection 단계를 시작했습니다."
+**Context**: 신규 FEATURE R-17 변경 요청 접수 및 Workspace Detection 시작.
+
+---
+
+## FEATURE R-17 Clarifying Questions Answered
+**Timestamp**: 2026-06-25T16:41:07+09:00
+**User Input**: "답변완료"
+**AI Response**: "사용자의 답변(Q1: A, Q2: A, Q3: B)을 분석하여 요구사항 정의서 `requirements.md`를 생성했습니다. API 경로(`GET /api/v1/jobs/{job_id}/artifacts`), 응답 스펙(`id`, `filename`, `content_type`, `created_at`), 예외 처리 정책(완료된 Job만 조회 허용 및 400/404 에러 처리)을 명시했습니다."
+**Context**: Requirements Analysis - 답변 분석 및 요구사항 명세 생성 시작.
+
+---
+
+## FEATURE R-17 Requirements Approved
+**Timestamp**: 2026-06-25T16:42:36+09:00
+**User Input**: "동의"
+**AI Response**: "사용자의 요구사항 명세 승인을 접수하여 기록했습니다. 다음 단계인 Workflow Planning으로 진입합니다. 이 과정에서 단순 API 추가 요건이므로 User Stories, Application Design, Units Generation은 SKIP합니다."
+**Context**: Inception phase - Requirements Analysis 승인 및 Workflow Planning 단계 진입.
+
+---
+
+## Workflow Planning - Approval
+**Timestamp**: 2026-06-25T16:43:26+09:00
+**AI Prompt**: "Ready to proceed with this plan?"
+**User Response**: " Approve & Continue"
+**Status**: Approved
+**Context**: Workflow plan created with 2 stages to execute (Code Generation, Build and Test)
+
+---
+
+## Code Generation Plan Review Request - FEATURE R-17
+**Timestamp**: 2026-06-25T16:45:12+09:00
+**AI Prompt**: "R-17 코드 생성 기획서에 대한 승인을 요청합니다. 선택지는 Request Changes 또는 Continue to Code Generation입니다."
+**User Response**: "Continue to Code Generation"
+**Status**: Approved
+**Context**: CONSTRUCTION phase - FEATURE R-17 Code Generation Part 1 계획 완료 및 승인 완료. 실제 코드 구현 시작.
+
+---
+
+## Code Generation Completion Approval - FEATURE R-17
+**Timestamp**: 2026-06-25T16:48:38+09:00
+**AI Prompt**: "Code generation complete. Ready to proceed to Build & Test?"
+**User Response**: " Continue to Next Stage"
+**Status**: Approved
+**Context**: Code Generation Part 2 완료 및 사용자 코드 승인 완료. Build and Test 단계로 진입.
+
+---
+
+## Build and Test Stage
+**Timestamp**: 2026-06-25T16:50:06+09:00
+**Build Status**: Success
+**Test Status**: Pass
+**Requirement Verification Status**: Complete
+**Requirement Verification Evidence**:
+- R-17 -> tests/test_unit_2.py 내 test_get_artifacts_success, test_get_artifacts_not_found, test_get_artifacts_not_completed -> Pass
+**Files Generated**:
+- build-instructions.md
+- unit-test-instructions.md
+- integration-test-instructions.md
+- performance-test-instructions.md
+- security-test-instructions.md
+- build-and-test-summary.md
+
+---
+
+## Build and Test Stage - Approval
+**Timestamp**: 2026-06-25T16:50:45+09:00
+**User Input**: "Approve & Continue"
+**AI Response**: "Build and Test 단계 최종 승인을 기록하고 Operations placeholder 단계를 완료 처리하여 FEATURE R-17 아티팩트 목록 조회 API 추가 개발 라이프사이클을 완결했습니다."
+**Status**: Approved / Completed
+**Context**: OPERATIONS - Operations placeholder 완료 및 라이프사이클 완결.
+
+---
+
+## Inception Phase - Workspace Detection
+**Timestamp**: 2026-06-25T17:01:11+09:00
+**User Input**: "바로 개발하면 안되고 검토를 해야하는디 
+`D:\workspace\scad\ai-making-rules\core-workflow.md` 에는 ai로 매이킹해서 설계도를 만드는 워크플로우가 작성되어있어
+내가 CLI로 scad를 만드는 데 멀티턴으로 해당 워크플로우로 만들면 조금더 낳은 품질을 유지할 수 있을 것같은데..어떻게 개발해야할지 방향을 잡아보자"
+**AI Response**: "AI-DLC 규칙에 따라 core-workflow.md를 우선 로드하고, 신규 요구사항인 'AI-MAKING 워크플로우 기반 multi-turn CAD/SCAD 생성 기능 설계'를 위한 Workspace Detection 단계를 시작했습니다."
+**Context**: 신규 검토 요청 접수 및 Workspace Detection 수행.
+
+---
+
+## Inception Phase - Requirements Analysis Clarifying Questions
+**Timestamp**: 2026-06-25T17:03:00+09:00
+**AI Prompt**: "I've created [requirement-verification-questions.md](file:///d:/workspace/CLI-Execution-Platform/aidlc-docs/inception/requirements/requirement-verification-questions.md) with 5 questions to clarify the requirements and design direction. Please fill in your answers in the file and let me know when you are done."
+**Context**: Awaiting user answers on the requirements clarification questionnaire.
+
+---
+
+## Inception Phase - Requirements Analysis Answers received
+**Timestamp**: 2026-06-25T17:06:45+09:00
+**User Input**: "답변했어"
+**AI Response**: "사용자의 답변을 분석하여 AI-MAKING 멀티턴 SCAD 생성 기능에 대한 요구사항 명세(R-18)를 작성하고 `aidlc-docs/inception/requirements/requirements.md`에 반영하였습니다. 요구사항 명세 최종 검토 승인을 요청합니다."
+**Context**: Requirements Analysis - 답변 분석 완료 및 요구사항 명세 생성.
+
+---
+
+## Inception Phase - Requirements Revision Request
+**Timestamp**: 2026-06-25T17:10:14+09:00
+**User Input**: "토큰 최적화를 위한 컨텍스트 축소 (Context Pruning): 이거 때문에 그러니까 플랜을 나누고 쪼개면 토큰량을 줄일 수 있자내 그 플랜에 맞는 지식만 넣으면되니까 모든 정보를 다 넣을 필요없어"
+**AI Response**: "피드백을 반영하여 전체 워크플로우를 세부 단계로 분할하고, 각 단계마다 해당 단계용 규칙/지식 가이드라인 및 캐싱된 상태(`making-state.json`)의 일부분만 주입하도록 요구사항 명세(R-18)를 수정하여 `requirements.md`에 업데이트했습니다."
+**Context**: Requirements Analysis - 요구사항 수정 피드백 수집 및 요구사항 명세 개정 완료.
+
+---
+
+## Inception Phase - Requirements Analysis Approval Prompt
+**Timestamp**: 2026-06-25T17:11:00+09:00
+**AI Prompt**: "Requirements analysis is complete with revisions. Ready to proceed to Workflow Planning stage?"
+**Context**: Awaiting user approval of revised requirements.
+
+---
+
+## Inception Phase - Requirements Approved
+**Timestamp**: 2026-06-25T17:13:02+09:00
+**User Input**: "Approve & Continue"
+**AI Response**: "요구사항 검토 승인을 확인했습니다. 이어서 Workflow Planning(워크플로우 계획) 단계를 실행하여 `aidlc-docs/inception/plans/execution-plan.md` 파일을 생성했습니다. 설계 전용 수명 주기에 따라 Application Design 및 Units Generation 단계를 거쳐 최종 설계서 발행으로 마감하는 계획에 대해 검토 승인을 요청합니다."
+**Context**: Inception phase - Requirements Analysis 승인 완료 및 Workflow Planning 완료.
+
+---
+
+## Workflow Planning - Approval
+**Timestamp**: 2026-06-25T17:13:10+09:00
+**AI Prompt**: "Ready to proceed with this plan?"
+**User Response**: ""
+**Status**: Pending
+**Context**: Workflow plan created with 3 stages to execute (Application Design, Units Generation, Functional Design)
+
+---
+
+
+
+
 

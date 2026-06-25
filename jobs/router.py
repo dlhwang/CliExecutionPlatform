@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
-from jobs.schemas import JobCreateRequest, JobResponse, RefinementRequest
+from jobs.schemas import JobCreateRequest, JobResponse, RefinementRequest, ArtifactListResponse
 from jobs.service import (
     JobService,
     RefinementConflictError,
@@ -185,6 +185,53 @@ def download_artifact(
                 "message": f"Artifact {filename} not found for Job {job_id}."
             }
         )
+
+
+@router.get(
+    "/{job_id}/artifacts",
+    response_model=list[ArtifactListResponse],
+    summary="Job ID 기반 아티팩트 목록 조회"
+)
+def get_artifacts_by_job_id(
+    job_id: UUID,
+    db: Session = Depends(get_db),
+    storage_service: StorageService = Depends(get_storage_service)
+):
+    """
+    특정 Job에 속한 아티팩트 목록을 조회합니다.
+    - 오직 완료(COMPLETED) 상태인 Job에 대해서만 조회를 허용합니다.
+    - 보안상 물리 경로나 서버 내부 경로는 응답에서 필터링됩니다.
+    """
+    job_service = JobService(db, storage_service)
+    
+    # 1. Job 존재 여부 검증
+    job = job_service.get_job(job_id)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "status": "error",
+                "code": "NOT_FOUND",
+                "message": f"Job {job_id} not found."
+            }
+        )
+        
+    # 2. Job 완료 상태 검증
+    if job.status != "COMPLETED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "error",
+                "code": "BAD_REQUEST",
+                "message": f"Job {job_id} is in status {job.status}. Artifacts can only be retrieved for COMPLETED jobs."
+            }
+        )
+        
+    # 3. 아티팩트 목록 조회 및 반환
+    from jobs.service import ArtifactService
+    artifact_service = ArtifactService(db, storage_service)
+    artifacts = artifact_service.get_artifacts_by_job_id(job_id)
+    return artifacts
 
 
 router_artifacts = APIRouter(prefix="/api/v1/artifacts", tags=["artifacts"])

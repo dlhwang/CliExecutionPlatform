@@ -682,3 +682,64 @@ def test_artifact_download_no_server_path_disclosure(db_session, test_storage):
     assert "etc\\passwd" not in err_msg
 
 
+def test_get_artifacts_success(client, db_session, test_storage):
+    """
+    R-17: 완료(COMPLETED) 상태인 Job에 연계된 아티팩트 목록이 정상적으로 반환되는가?
+    응답에는 id, filename, content_type, created_at만 포함되고 relative_path는 없어야 한다.
+    """
+    job_id = uuid.uuid4()
+    job = Job(id=job_id, prompt="주사위 만들기", status="COMPLETED")
+    db_session.add(job)
+    db_session.commit()
+
+    test_storage.create_workspace(job_id)
+    test_storage.write_file(job_id, "output.stl", "stl_content")
+
+    from jobs.service import ArtifactService
+    artifact_service = ArtifactService(db_session, test_storage)
+    artifact = artifact_service.register_artifact(job_id, "output.stl")
+    db_session.commit()
+
+    response = client.get(f"/api/v1/jobs/{job_id}/artifacts")
+    assert response.status_code == 200
+    
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] == str(artifact.id)
+    assert data[0]["filename"] == "output.stl"
+    assert data[0]["content_type"] == "application/octet-stream"
+    assert "created_at" in data[0]
+    assert "relative_path" not in data[0]  # 보안상 차단 검증
+
+
+def test_get_artifacts_not_found(client):
+    """
+    R-17: 존재하지 않는 job_id 조회 시 404 Not Found를 반환하는가?
+    """
+    random_job_id = uuid.uuid4()
+    response = client.get(f"/api/v1/jobs/{random_job_id}/artifacts")
+    assert response.status_code == 404
+    
+    data = response.json()
+    assert data["detail"]["code"] == "NOT_FOUND"
+    assert "not found" in data["detail"]["message"].lower()
+
+
+def test_get_artifacts_not_completed(client, db_session):
+    """
+    R-17: Job 상태가 COMPLETED가 아닐 때 (CREATED, RUNNING, FAILED) 400 Bad Request를 반환하는가?
+    """
+    for status in ("CREATED", "RUNNING", "FAILED"):
+        job_id = uuid.uuid4()
+        job = Job(id=job_id, prompt="작업용", status=status)
+        db_session.add(job)
+        db_session.commit()
+
+        response = client.get(f"/api/v1/jobs/{job_id}/artifacts")
+        assert response.status_code == 400
+        
+        data = response.json()
+        assert data["detail"]["code"] == "BAD_REQUEST"
+        assert "completed" in data["detail"]["message"].lower()
+
+
