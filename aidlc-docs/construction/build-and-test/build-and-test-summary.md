@@ -9,13 +9,14 @@
 ## 테스트 수행 요약
 
 ### 1. 유닛 테스트 (Unit Tests)
-- **전체 테스트 수**: 95
-- **통과 (Passed)**: 95
+- **전체 테스트 수**: 96
+- **통과 (Passed)**: 96
 - **실패 (Failed)**: 0
 - **상태**: **Pass (합격)**
 - **특이사항**: 
   - R-16 아티팩트 등록 및 다운로드 검증을 위해 `tests/test_unit_2.py`에 추가된 13개 테스트 케이스 모두 완벽하게 통과함.
   - R-17 Job ID 기반 아티팩트 목록 조회 검증을 위해 `tests/test_unit_2.py`에 추가된 3개 테스트 케이스 모두 완벽하게 통과함.
+  - R-17-LOGGING 아티팩트 생명주기 로깅 마커 및 경로 실패 디버깅 상세 콘솔 출력 검증을 위해 `tests/test_unit_2.py`에 추가된 테스트 케이스가 완벽하게 통과함.
 
 ### 2. 통합 테스트 (Integration Tests)
 - **테스트 시나리오 수**: 2
@@ -55,6 +56,8 @@
 | **R-17** | DB에 존재하지 않는 `job_id` 조회 시 404 Not Found를 발생하는가 | `tests/test_unit_2.py::test_get_artifacts_not_found` | `pytest tests/test_unit_2.py` | **Pass** |
 | **R-17** | Job 상태가 `COMPLETED`가 아닐 때 (CREATED, RUNNING, FAILED) 400 Bad Request를 발생하는가 | `tests/test_unit_2.py::test_get_artifacts_not_completed` | `pytest tests/test_unit_2.py` | **Pass** |
 | **R-17** | 반환 스키마에 `relative_path` 정보가 차단(제외)되었는가 | `tests/test_unit_2.py::test_get_artifacts_success` (relative_path 부재 확인) | `pytest tests/test_unit_2.py` | **Pass** |
+| **R-17-LOGGING** | 아티팩트 전 단계 11가지 로그 마커 출력 및 경로 실패 콘솔 로깅 | `tests/test_unit_2.py::test_artifact_lifecycle_logging_markers` | `pytest tests/test_unit_2.py` | **Pass** |
+| **R-17-LOGGING** | 에러 본문 내 절대 서버 경로 미노출 및 로깅 내 경로 포함 검증 | `tests/test_unit_2.py::test_artifact_lifecycle_logging_markers` | `pytest tests/test_unit_2.py` | **Pass** |
 
 ## 검증 상세 의견 (Verification Notes)
 - **기능 검증**: R-17 아티팩트 목록 조회 엔드포인트는 RESTful 구조에 부합하며, 비즈니스 룰 및 예외(미존재시 404, 미완료시 400) 처리가 테스트를 통해 실증되었습니다.
@@ -62,6 +65,6 @@
 
 ## 최종 판단 (Overall Status)
 - **빌드 여부**: **Success**
-- **테스트 통과 여부**: **Pass** (95/95 Passed)
+- **테스트 통과 여부**: **Pass** (96/96 Passed)
 - **요구사항 검증 현황**: **Complete** (요구사항 전 항목 검증 완료)
 - **운영(Operations) 단계 진행 준비 완료 여부**: **Yes**

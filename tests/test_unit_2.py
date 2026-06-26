@@ -743,3 +743,88 @@ def test_get_artifacts_not_completed(client, db_session):
         assert "completed" in data["detail"]["message"].lower()
 
 
+def test_artifact_lifecycle_logging_markers(db_session, test_storage, caplog):
+    """
+    R-17-LOGGING: 아티팩트 생명주기 로깅 마커 및 경로 검증 실패 시 상세 로그 확인
+    """
+    import logging
+    # 캡처 레벨 설정
+    caplog.set_level(logging.INFO)
+    
+    from jobs.service import ArtifactService
+    job_id = uuid.uuid4()
+    job = Job(id=job_id, prompt="Test logging", status="RUNNING")
+    db_session.add(job)
+    db_session.commit()
+
+    test_storage.create_workspace(job_id)
+    test_storage.write_file(job_id, "model.scad", "cube([10, 20, 30]);")
+
+    artifact_service = ArtifactService(db_session, test_storage)
+
+    # 1. 아티팩트 메타데이터 등록 시 마커 검증
+    # ARTIFACT_METADATA_CREATE_STARTED 및 ARTIFACT_METADATA_CREATE_COMPLETED 확인
+    artifact = artifact_service.register_artifact(job_id, "model.scad")
+    db_session.commit()
+    
+    assert any("[ARTIFACT_METADATA_CREATE_STARTED]" in record.message for record in caplog.records)
+    assert any("[ARTIFACT_METADATA_CREATE_COMPLETED]" in record.message for record in caplog.records)
+    
+    # 2. save_artifact 호출 시 마커 검증
+    # ARTIFACT_COPY_STARTED 및 ARTIFACT_COPY_COMPLETED 확인
+    caplog.clear()
+    test_storage.save_artifact(job_id, "model.scad")
+    
+    assert any("[ARTIFACT_COPY_STARTED]" in record.message for record in caplog.records)
+    assert any("[ARTIFACT_COPY_COMPLETED]" in record.message for record in caplog.records)
+
+    # 3. get_artifact_for_download 성공 시 마커 검증
+    # ARTIFACT_DOWNLOAD_READY 확인
+    caplog.clear()
+    file_path, content_type, filename = artifact_service.get_artifact_for_download(artifact.id)
+    assert any("[ARTIFACT_DOWNLOAD_READY]" in record.message for record in caplog.records)
+    
+    # 4. save_artifact 복사 실패 시 마커 검증
+    # ARTIFACT_COPY_FAILED 확인
+    caplog.clear()
+    with pytest.raises(FileNotFoundError):
+        test_storage.save_artifact(job_id, "missing.scad")
+    assert any("[ARTIFACT_COPY_FAILED]" in record.message for record in caplog.records)
+
+    # 5. 경로 검증 실패 시 상세 로그(is_relative_to 실패 등)
+    # ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED 마커 및 target_path, base_job_dir 포함 여부 확인
+    caplog.clear()
+    
+    # 샌드박스 밖의 파일
+    outside_file = test_storage.base_dir / "outside_secret_log.txt"
+    outside_file.write_text("secret log info")
+    
+    jobs_dir = test_storage.base_dir / "jobs" / str(job_id)
+    symlink_path = jobs_dir / "secret_symlink.txt"
+    try:
+        symlink_path.symlink_to(outside_file)
+    except OSError:
+        pytest.skip("Symlink creation not allowed in this environment")
+
+    from jobs.models import Artifact
+    evil_artifact = Artifact(
+        job_id=job_id,
+        relative_path="secret_symlink.txt",
+        filename="secret_symlink.txt",
+        content_type="text/plain"
+    )
+    db_session.add(evil_artifact)
+    db_session.commit()
+    
+    from jobs.service import ArtifactPermissionError
+    with pytest.raises(ArtifactPermissionError):
+        artifact_service.get_artifact_for_download(evil_artifact.id)
+        
+    path_fail_records = [r for r in caplog.records if "[ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED]" in r.message]
+    assert len(path_fail_records) > 0
+    # 실제 물리 경로 정보가 로그 메시지에 들어있는지 확인
+    assert any("target_path" in r.message or "base_job_dir" in r.message for r in path_fail_records)
+
+
+
+

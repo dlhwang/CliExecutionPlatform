@@ -410,40 +410,292 @@ Artifact 메타데이터는 최소한 고유 `id`, 소유 `job_id`, `relative_pa
 
 ---
 
-## 5. AI-MAKING 멀티턴 SCAD 생성 기능 요구사항 (R-18)
-
-### Requirement R-18: AI-MAKING 워크플로우 기반 멀티턴 CAD/SCAD 생성 기능 설계
+### Requirement R-17-LOGGING: 아티팩트 생명주기 로깅 마커 도입 및 경로 검증 상세 디버그 로그 보강
 
 #### Intent Analysis Summary
-- **User Request**: AI-MAKING 워크플로우(`D:\workspace\scad\ai-making-rules\core-workflow.md`)를 반영하여 사용자 대화 및 피드백을 수집하며 고품질 CAD/SCAD 설계도를 생성하는 멀티턴 오케스트레이션 기능 설계.
-- **Request Type**: New Feature / Architectural Design
-- **Scope Estimate**: JobOrchestratorService, LLM Client, Session State, API Router
-- **Complexity Estimate**: 보통/높음 - 멀티턴 상태 전이 기획, 실측 데이터 및 공차 파싱, 테스트 쿠폰 피드백 반영, 토큰 절약을 위한 컨텍스트 요약/축소(Context Pruning) 로직 필요.
+- **User Request**: 아티팩트 생성, 이관 복사, DB 영속화, 다운로드 전 단계에 대해 구조화된 11개의 이벤트 마커를 적용하여 로깅하고, 경로 검증 실패 등 장애 상황 시 진단이 가능한 상세 로그(실제 물리 경로 정보 포함)를 서버에 출력하도록 개선한다.
+- **Request Type**: Bug Fix / Diagnostic Enhancement
+- **Scope Estimate**: storage/local.py, jobs/service.py, jobs/router.py, 자동화 테스트
+- **Complexity Estimate**: 보통 - 기존 보안 검증 규칙을 유지하면서 각 흐름의 진입/완료/실패 시점에 11가지의 지정된 마커를 형식화된 로깅 메시지로 정확히 주입하고 예외 발생 원인을 수집해야 한다.
 
 #### Description
-사용자의 자연어 요청에 따라 실측 공차를 반영하고 단계별 승인을 거치는 고품질 설계 워크플로우를 구현하기 위해 시스템은 다음 기능을 제공해야 한다.
-1. **단계별 명시적 UI 전진 및 승인 구조 (State Machine)**:
-   - Inception 단계(요구사항 분석, 실측 측정, 재료 분석) 및 Execution 단계(테스트 쿠폰, 본 모델 설계)의 현재 단계를 API/SSE를 통해 투명하게 전달한다.
-   - 각 단계 전환 시 사용자 승인(Approve) 또는 질문 답변을 획득해야 다음 상태로 전진하는 오케스트레이션 로직을 적용한다.
-2. **실측 치수 되묻기 및 동적 공차 파싱 (Proactive Clarification)**:
-   - 사용자가 처음부터 치수를 자세히 제공하지 않으므로, 요청한 조형물(예: 충전 도크, 기어, 함체)에 맞는 실측 필요 항목(Measured Specs)을 LLM이 스스로 판단하여 질문 리스트로 도출하도록 한다.
-   - 사용자는 자연어로 치수와 공차를 답변할 수 있으며, 시스템은 이를 파싱하여 세션 스펙으로 유지한다.
-3. **토큰 최적화를 위한 컨텍스트 축소 및 단계별 지식 분할 (Context Pruning & Specialized Knowledge Injection)**:
-   - 멀티턴의 누적 대화 기록 전체와 전체 워크플로우 규칙을 매번 LLM에 전달하면 토큰 비용과 컨텍스트 한계 초과 우려가 존재한다.
-   - 이를 방지하기 위해, 전체 워크플로우를 세부 단계(요구사항 분석, 실측 측정, 테스트 쿠폰 설계, 본 설계 등)로 명확히 분할하고, 각 단계 실행 시 **해당 단계에 꼭 필요한 규칙/지식(예: 해당 단계 전용 가이드라인)과 요약 정형화 상태(`making-state.json`)의 서브셋**만 동적으로 조립하여 주입한다. 이전 턴의 원문 대화 기록이나 불필요한 다른 단계의 가이드를 차단함으로써 입력 토큰량을 최소화한다.
-4. **테스트 쿠폰 검증 루프 (Test Coupon Design)**:
-   - 조립이나 볼트 체결 등 공차가 민감한 구간을 검증하기 위한 단순화된 형상의 테스트 조각(`test_coupon.scad`)을 선제적으로 생성하여 사용자의 물리적 조립성 피드백을 수집하고, 이를 본 모델 설계 파라미터에 피드백 루프로 자동 주입한다.
+- 아티팩트가 생성되고 격리 보관소(`artifacts/`)로 물리 복사되며, DB에 메타데이터가 등록되고 최종 다운로드되는 전 주기에 걸쳐 명확히 추적할 수 있도록 11개의 지정된 이벤트 마커를 로그에 출력한다.
+- 다운로드 요청 처리 시 `is_relative_to` 검증 실패(403) 및 물리 파일 부재(404) 발생 시, 삼켜지는 예외의 원인 정보와 실제 resolve된 경로 쌍(`target_path`, `base_job_dir`)을 서버 콘솔 로그(stdout/stderr)에 `WARNING` 또는 `ERROR` 레벨로 출력하여 운영 및 로컬 개발 환경(Mac Docker UI 포함)에서 즉각 디버깅이 가능하도록 보완한다.
+
+#### Log Markers to Implement
+- **`ARTIFACT_GENERATION_COMPLETED`**: CLI Runner에서 실행 성공 후 결과 파일들을 Job workspace 디렉토리로 정상 복사한 시점.
+- **`ARTIFACT_COPY_STARTED`**: jobs/에서 artifacts/ 공간으로 물리 복사 시도를 시작하는 시점.
+- **`ARTIFACT_COPY_COMPLETED`**: artifacts/ 하위로 파일 물리 복사가 완전히 끝난 시점.
+- **`ARTIFACT_COPY_FAILED`**: 파일 복사 중 `FileNotFoundError` 등 오류가 발생해 취소된 시점.
+- **`ARTIFACT_METADATA_CREATE_STARTED`**: DB 아티팩트 메타데이터 등록 검증 및 DB 삽입 시점.
+- **`ARTIFACT_METADATA_CREATE_COMPLETED`**: DB 트랜잭션이 커밋되고 아티팩트 메타데이터가 정상 영속화된 시점.
+- **`ARTIFACT_DOWNLOAD_REQUESTED`**: 파일명 기반 또는 ID 기반 아티팩트 다운로드 API에 진입한 시점.
+- **`ARTIFACT_DOWNLOAD_METADATA_NOT_FOUND`**: DB에서 요청된 아티팩트 정보(ID/파일명)를 찾지 못한 시점.
+- **`ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED`**: `is_relative_to` 검증 실패 등 Path Traversal 탐지에 걸려 차단된 시점. (검증 실패 경로 로깅 포함)
+- **`ARTIFACT_DOWNLOAD_FILE_NOT_FOUND`**: 메타데이터는 있으나 실제 artifacts 공간에 물리 파일이 유실된 시점.
+- **`ARTIFACT_DOWNLOAD_READY`**: 모든 검증을 완료하고 `FileResponse`를 통해 클라이언트에게 파일 반환을 시작하는 시점.
 
 #### Acceptance Criteria
-- **명시적 전이**: API를 통해 현재 Job의 세부 AI-MAKING 상태(요구사항 대기, 테스트 쿠폰 피드백 대기, 본 설계 대기 등)를 조회할 수 있어야 한다.
-- **자연어 치수 획득**: 실측치가 누락된 경우 LLM이 질문을 작성하여 사용자 답변을 자연어로 유도하고 이를 `measured-specs` 컨텍스트에 바인딩한다.
-- **토큰 최적화 및 지식 분할 검증**: 특정 단계(예: 본 모델 생성) 요청 시, 전체 AI-MAKING 워크플로우가 아닌 해당 본 설계 전용 규칙 파일과 누적 상태(`making-state.json`)만 컨텍스트에 포함되며, 이전 대화 원문은 제외하여 입력 토큰이 최적화됨을 검증한다.
-- **테스트 쿠폰 선행**: 조립이 필요한 복잡한 제품 설계 시 본 설계 이전에 `test_coupon.scad` 생성 액션 및 사용자 검토 단계를 반드시 통과해야 한다.
+- 11가지 로그 마커는 파일 I/O 및 API 수행 시점의 로깅 메시지에 정확히 접두어/식별자(`[MARKER]`) 형태로 포함되어야 한다.
+- 경로 검증 시 `PermissionError` 또는 `ArtifactPermissionError` 가 발생할 때, 해당 오류가 발생하는 상세한 사유(예: `ValueError` 세부내용, target_path와 base_job_dir 값 등)를 서버 로그에 `WARNING` 레벨 이상으로 출력한다.
+- `check_artifact_exists` 내에서 경로 검증 실패 시 예외를 삼키더라도, 실패 로그(`[ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED]`)는 정상적으로 파일명과 함께 출력되어야 한다.
+- 호스트 절대 서버 경로가 **사용자 응답 본문(HTTP Response Body/Error Detail)에는 절대로 노출되지 않도록** 기존의 에러 메시지 은폐 보안 수칙은 완벽하게 유지한다.
+- 기존의 모든 보안 제약(Path Traversal 탐지, 절대 경로 거절, 공통 접두사 우회 탐지) 및 95개 전체 자동화 테스트 통과를 만족해야 한다.
 
 #### Verification Expectations
 - **Automation Required**: Yes
 - **Expected Test Level**: unit/integration
 - **Required Test Evidence**:
-  - `tests/test_unit_aimaking.py`를 추가하여 AI-MAKING 오케스트레이터의 단계별 상태 전이(요구사항 수집 -> 테스트 쿠폰 검증 -> 본 설계 완료) 로직을 모의 테스트한다.
-  - 컨텍스트 빌드 시 이전 턴의 raw 대화 텍스트가 전달되지 않고, 요약된 JSON 상태 데이터만 Prompt에 포함되는지 단언문으로 검증한다.
-  - 누락된 치수 감지 프롬프트 템플릿의 정상 빌드 여부를 유닛 테스트로 검증한다.
+  - `tests/test_unit_2.py` 또는 `tests/test_unit_3.py` 내의 다운로드 및 복사 테스트 케이스 실행 시, 콘솔 로그에서 각 마커들이 적절하게 호출 및 출력되는지 검증한다.
+  - 경로 유효성 검사 실패 및 파일 누락 모의 테스트 시 해당하는 실패 마커(`[ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED]`, `[ARTIFACT_DOWNLOAD_FILE_NOT_FOUND]`)가 출력되는지 검증한다.
+  - 95개 전체 테스트 스위트의 회귀 없음 증명.
+
+---
+
+## 5. AI-MAKING 멀티턴 SCAD 생성 기능 요구사항 (R-18)
+
+### Requirement R-18: AI-MAKING 워크플로우 기반 멀티턴 CAD/SCAD 생성 기능 설계 명세
+
+#### Intent Analysis Summary
+- **User Request**: AI-MAKING 워크플로우(`D:\workspace\scad\ai-making-rules\core-workflow.md`)를 반영하여 사용자 대화 및 피드백을 수집하며 고품질 CAD/SCAD 설계도를 생성하는 멀티턴 오케스트레이션 기능 설계.
+- **Request Type**: New Feature / Architectural Design
+- **Scope Estimate**: JobOrchestratorService, LLM Client, Session State, API Router, database.py 스키마, SSE 라우터
+- **Complexity Estimate**: 높음 - 상태 머신(WAITING_FOR_USER 도입), 상세 터미널 상태, 트리거 형식 분리, 헤더 기반 멱등성 검증, 치수 스키마 확장(Tolerance, Required 명시), Allowed Actions 충돌 해소, SSE 및 Artifact 메타데이터 설계를 포함하여 즉시 구현 가능한 명세를 수립해야 함.
+
+#### Description
+사용자의 자연어 요청에 따라 실측 공차를 반영하고 단계별 승인을 거치는 고품질 설계 워크플로우를 구현하기 위해 시스템은 다음 명세를 준수하여 설계 및 구현되어야 한다.
+
+---
+
+### 1. 상태 머신(State Machine) 설계 및 전이표
+
+#### Job State 확장
+기존 Job State (`CREATED`, `RUNNING`, `COMPLETED`, `FAILED`)에 대기 상태인 `WAITING_FOR_USER`를 추가한다.
+- **`WAITING_FOR_USER` 상태의 의도**: 사용자의 답변이나 피드백 입력을 대기하고 있을 때, 오케스트레이터의 비동기 백엔드 워커 스레드/대기열 슬롯을 명시적으로 반환(Release)하여 자원 기아(Starvation)를 방지하고, 클라이언트에게 입력이 필요함을 알린다.
+
+#### Making State Enums (세부 비즈니스 단계)
+- `INIT`: 초기 상태. 사용자의 최초 설계 요청 접수 상태.
+- `REQUIREMENTS_ANALYSIS`: 사용자의 요청 분석 및 기능 요구사항 식별 상태.
+- `MEASUREMENT_PLAN`: 실측 필요 치수를 파악하고 사용자에게 치수/공차 입력을 유도하는 상태.
+- `COUPON_DESIGN`: 핏 공차 테스트용 쿠폰(`test_coupon.scad`)을 설계 및 렌더링하는 상태.
+- `COUPON_VALIDATION`: 생성된 테스트 쿠폰에 대해 사용자의 실물/조립성 피드백 입력을 대기하는 상태.
+- `MAIN_DESIGN`: 본 제품 설계 모델(`model.scad`) 및 조립 가이드를 생성하는 상태.
+- `REFINEMENT`: 최종 모델에 대한 사용자의 수정 피드백을 대기하고 반영하는 상태.
+- `COMPLETED`: (종결) 사용자가 최종 모델 승인을 완료하여 전체 설계가 종결된 상태.
+- `FAILED`: (종결) 자가 수정 한도 초과, 컴파일 에러, 또는 기타 복구 불가능한 시스템 오류로 실패한 상태.
+- `CANCELLED`: (종결) 사용자가 중단 의사를 표시하여 설계 작업을 명시적으로 취소한 상태.
+- `EXPIRED`: (종결) 사용자가 치수 입력이나 쿠폰 승인 등 대기 상태에서 일정 시간(예: 24시간) 동안 응답하지 않아 시간 초과로 강제 종료된 상태.
+
+#### Making State 전이표 (State Transition Table)
+
+| 출발 상태 (Source) | 트리거 타입 (Trigger Type) | 전이 조건 / 이벤트 (Event/Condition) | 목표 상태 (Target) | 설명 / 전이 처리 |
+|---|---|---|---|---|
+| `INIT` | `SYSTEM_AUTO` | Job 기동 및 최초 환경 준비 완료 | `REQUIREMENTS_ANALYSIS` | 요구사항 수집 시작 |
+| `REQUIREMENTS_ANALYSIS` | `SYSTEM_AUTO` | 요구사항 명세서(`making-requirements.md`) 생성 완료 | `MEASUREMENT_PLAN` | 치수 분석 및 실측 수집 단계로 전이 |
+| `MEASUREMENT_PLAN` | `USER_EVENT` | 치수/공차 피드백 데이터 제출 (`decision == "ANSWER"`) | `MEASUREMENT_PLAN` | 제출받은 치수 스키마 검증 및 신뢰도 체크 수행 (치수 미비 시 대기 상태 유지) |
+| `MEASUREMENT_PLAN` | `SYSTEM_VALIDATION` | 모든 필수 치수 검증 완료 및 `is_coupon_required == true` | `COUPON_DESIGN` | 실측 완료 및 공차 구간 검증을 위한 테스트 쿠폰 설계 기동 |
+| `MEASUREMENT_PLAN` | `SYSTEM_VALIDATION` | 모든 필수 치수 검증 완료 및 `is_coupon_required == false` | `MAIN_DESIGN` | 공차가 필요 없는 경우 쿠폰을 건너뛰고 본 설계로 직행 |
+| `MEASUREMENT_PLAN` | `SYSTEM_TIMEOUT` | 사용자 무응답 대기 제한 시간(24시간) 초과 | `EXPIRED` | 세션 만료 종료 |
+| `COUPON_DESIGN` | `SYSTEM_VALIDATION` | `test_coupon.scad` 생성 및 컴파일러 검증(정적+렌더링) 통과 | `COUPON_VALIDATION` | 컴파일이 통과된 쿠폰에 대해 사용자 피드백 대기 |
+| `COUPON_DESIGN` | `SYSTEM_VALIDATION` | 컴파일 실패 및 자가 수정(Self-Correction) 재시도 소진 | `FAILED` | 복구 불가능한 오류로 인한 실패 처리 |
+| `COUPON_VALIDATION` | `USER_EVENT` | 쿠폰 승인 완료 (`decision == "APPROVE"`) | `MAIN_DESIGN` | 검증된 치수 스펙을 바탕으로 본체 설계 시작 |
+| `COUPON_VALIDATION` | `USER_EVENT` | 쿠폰 반려 (`decision == "REJECT"`) | `MEASUREMENT_PLAN` | 치수 오차 교정을 위해 치수 수집 단계로 **되감기(Rewind)** 전이 |
+| `COUPON_VALIDATION` | `USER_EVENT` | 사용자 중단 명시 (`decision == "CANCEL"`) | `CANCELLED` | 사용자의 요청에 의한 설계 작업 명시적 취소 |
+| `COUPON_VALIDATION` | `SYSTEM_TIMEOUT` | 사용자 무응답 대기 제한 시간(24시간) 초과 | `EXPIRED` | 세션 만료 종료 |
+| `MAIN_DESIGN` | `SYSTEM_VALIDATION` | `model.scad` 생성 및 컴파일러 검증(정적+렌더링) 통과 | `REFINEMENT` | 최종 조립 모델 완성 및 사용자 최종 피드백 대기 |
+| `MAIN_DESIGN` | `SYSTEM_VALIDATION` | 컴파일 실패 및 자가 수정(Self-Correction) 재시도 소진 | `FAILED` | 복구 불가능한 오류로 인한 실패 처리 |
+| `REFINEMENT` | `USER_EVENT` | 수정 피드백 제출 (`decision == "REJECT"`) | `MAIN_DESIGN` | 피드백 의견을 반영하여 본체 재설계 수행 |
+| `REFINEMENT` | `USER_EVENT` | 최종 설계 승인 (`decision == "APPROVE"`) | `COMPLETED` | 결과물 최종 확정 및 아티팩트 등록 마감 |
+| `REFINEMENT` | `USER_EVENT` | 사용자 중단 명시 (`decision == "CANCEL"`) | `CANCELLED` | 사용자의 요청에 의한 설계 작업 명시적 취소 |
+| `REFINEMENT` | `SYSTEM_TIMEOUT` | 사용자 무응답 대기 제한 시간(24시간) 초과 | `EXPIRED` | 세션 만료 종료 |
+
+---
+
+### 2. Job State와 Making State의 관계 분리 및 WAITING_FOR_USER 처리
+
+- **Job State와 Making State 관계 매핑 규칙**:
+  - Making State가 `INIT`, `REQUIREMENTS_ANALYSIS`, `COUPON_DESIGN`, `MAIN_DESIGN`일 때, Job State는 `RUNNING`이다. (서버/LLM이 작업을 활발히 처리 중인 상태)
+  - Making State가 `MEASUREMENT_PLAN` (최초 질문 후 치수 대기), `COUPON_VALIDATION`, `REFINEMENT`에 들어가 대기할 때, **Job State는 `WAITING_FOR_USER`로 전이**된다.
+  - `WAITING_FOR_USER` 전이 시, 오케스트레이터의 동시성 게이트 슬롯(`OrchestrationConcurrencyGate`)은 릴리즈되어 대기열의 다음 작업이 시작될 수 있도록 자원을 즉시 해제한다.
+  - 사용자가 이벤트 API를 통해 의견을 제출하여 `USER_EVENT`가 유입되면, Job State는 다시 `RUNNING` 상태로 복구되고, 동시성 게이트 슬롯을 재획득하여 Making State의 전이 처리를 재개한다.
+  - Making State가 `COMPLETED`로 확정되면 Job State는 `COMPLETED`로 최종 마감 처리된다.
+  - Making State가 `FAILED`, `CANCELLED`, `EXPIRED` 등의 종결 상태로 확정되면 Job State는 `FAILED`로 연동되어 전이된다.
+
+---
+
+### 3. 사용자 이벤트 API 및 Allowed Action 계약
+
+#### API 엔드포인트 및 Pydantic Payload 스키마 설계
+- **엔드포인트**: `POST /api/v1/jobs/{job_id}/events`
+- **멱등성 검증**: 클라이언트는 HTTP 요청 헤더에 `X-Idempotency-Key` (UUIDv7)를 실어 보낸다. 바디 페이로드에서는 멱등키를 제외하여 역할을 분리한다.
+- **Pydantic 스키마 정의**:
+  ```python
+  from pydantic import BaseModel, Field
+  from typing import Optional, Literal, Dict
+
+  class UserFeedbackEventPayload(BaseModel):
+      decision: Literal["APPROVE", "REJECT", "ANSWER", "CANCEL"] = Field(..., description="사용자의 의사결정 타입")
+      content: Optional[str] = Field(None, max_length=1000, description="텍스트 피드백 내용. decision이 REJECT인 경우 필수")
+      dimensions_data: Optional[Dict[str, float]] = Field(
+          None, 
+          description="수정 또는 입력할 실측 치수 값 딕셔너리. decision이 ANSWER인 경우 필수"
+      )
+  ```
+
+- **스키마 결합 제약사항**:
+  - `decision == "REJECT"`인 경우 `content` 필드는 필수(Not Null & Not Empty)이며 그 외의 경우 생략 가능하다.
+  - `decision == "ANSWER"`인 경우 `dimensions_data` 필드는 필수(Not Null)이며, 치수 변수명과 실측 실수(float) 값의 매핑을 요구한다.
+
+#### Allowed Actions 목록 정리 및 ASK_USER 추가 (R-2 & R-18 계약 통합)
+- 기존 R-2 요구사항의 허용 액션 목록과 R-18의 질문 생성 동작 간 충돌을 방지하기 위해, 글로벌 허용 액션 목록에 `ASK_USER`를 추가한다.
+- **최종 ALLOWED_ACTIONS 목록**: `("CREATE_DIRECTORY", "WRITE_FILE", "RUN_TOOL", "CREATE_ARTIFACT", "ASK_USER")`
+- `ASK_USER` 액션은 파일이나 쉘 커맨드를 호출하지 않고, LLM이 사용자에게 되물을 질문 딕셔너리를 포함한 JSON 명세를 서버에 전송하며, 서버는 이를 캐시 상태에 업데이트하고 Job을 `WAITING_FOR_USER`로 전이시키기 위한 목적으로만 사용된다.
+
+---
+
+### 4. measured-specs JSON 스키마 및 Confidence/Confirmation 정책
+
+실측 측정 데이터는 다음과 같은 엄격한 JSON 구조로 관리하여 상태 캐시에 저장한다.
+
+#### `measured-specs` JSON Schema
+```json
+{
+  "type": "object",
+  "properties": {
+    "required_dimensions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "이 설계를 위해 반드시 수집되어야 하는 필수 변수 키 목록"
+    },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "number" },
+          "unit": { "type": "string", "enum": ["mm", "degree"] },
+          "source": { "type": "string", "enum": ["user_input", "inference", "default_table"] },
+          "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+          "confirmed": { "type": "boolean" }
+        },
+        "required": ["value", "unit", "source", "confidence", "confirmed"]
+      }
+    },
+    "tolerances": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "number" },
+          "unit": { "type": "string", "enum": ["mm", "degree"] },
+          "source": { "type": "string", "enum": ["material_standard", "user_input", "inference"] }
+        },
+        "required": ["value", "unit", "source"]
+      }
+    },
+    "design_intent_summary": { "type": "string" }
+  },
+  "required": ["required_dimensions", "dimensions", "tolerances", "design_intent_summary"]
+}
+```
+
+#### Confidence / Confirmation 정책 (되묻기 및 진입 장벽 규칙)
+- **진입 장벽 규칙**: `required_dimensions`에 등재된 키 중, `dimensions` 내에 해당 키가 존재하지 않거나, 존재하더라도 `confidence < 0.7` 또는 `confirmed == false` 상태인 치수가 존재한다면 다음 단계 전이가 물리적으로 차단된다.
+- 시스템은 이 기준을 바탕으로 `WAITING_FOR_USER` 상태를 기동하고 미비한 치수 수정을 요구한다.
+
+---
+
+### 5. 테스트 쿠폰 필수/생략 분기 규칙 (is_coupon_required)
+
+LLM은 `REQUIREMENTS_ANALYSIS` 상태에서 아래 논리 규칙에 따라 `is_coupon_required` 플래그를 판단한다.
+
+#### 필수 분기 조건 (is_coupon_required = true)
+- 두 개 이상의 부품이 서로 맞물리거나 움직이는 구조(예: 슬라이드 조인트, 기어 결합, 힌지)인 경우.
+- 외부 기성 부품(예: 샤오미 워치 충전 도킹 케이블, 볼트/너트, 베어링)을 결합하기 위해 엄격한 외경 맞춤 공차가 필요한 경우.
+- 스냅 핏(Snap-fit) 결합 방식처럼 재료 탄성 대비 미세한 돌출 공차 조정이 필수적인 경우.
+
+#### 생략 분기 조건 (is_coupon_required = false)
+- 별도의 조립 요소가 없는 단일 파트 조형물(예: 연필꽂이, 단순 트레이, 피규어 스탠드)인 경우.
+- 결합부에 관계없이 시각적/기하학적 형상 구성이 주를 이루는 경우.
+
+---
+
+### 6. PromptBuilder 입력 허용/금지 컨텍스트 및 테스트 검증
+
+#### Prompt Builder Context Policy
+- **허용 목록 (Allowlist)**:
+  - 현재 활성화된 단계 전용 가이드라인 파일 (예: 쿠폰 단계 시 `test-coupon-design.md`만 로드).
+  - 정제된 `making-state.json` (누적된 `measured-specs` 및 `design_intent_summary`).
+  - 바로 직전 시도의 오류 로그 또는 다이어스노스틱 피드백.
+- **금지 목록 (Blocklist)**:
+  - 이전 턴의 비정형 대화 원문 히스토리 전체 (`raw_chat_history`).
+  - 다른 단계의 미관련 가이드라인 파일들.
+  - 시스템 Traceback 스택 및 가공되지 않은 intermediate CLI stderr 스트링.
+
+#### Verification Expectations (테스트 단언문)
+- `tests/test_unit_aimaking.py`에 단언(Assertion) 테스트를 작성한다.
+  - `PromptBuilder.build_prompt()` 결과 본문에 `"raw_chat_history"` 또는 `"user_message"` 원문이 포함되어 있지 않음을 확인한다 (`assert "chat_history" not in prompt_payload`).
+  - 생성된 프롬프트에 `design_intent_summary`와 현재 단계 가이드의 핵심 단어(예: `test_coupon`)가 포함되어 있는지 검증한다.
+
+---
+
+### 7. 실패, 재시도, 멱등성 및 중복 제출 방어
+
+- **자동 구문 검증 및 자가 수정 (Self-Correction Loop)**:
+  - `test_coupon.scad` 및 `model.scad`가 생성된 직후, 사용자에게 파일이 전달되기 전에 시스템은 무인(Automated) 컴파일러 검증을 트리거하여 OpenSCAD CLI를 실행한다.
+  - 실행 실패 시 `CLIExecutionError`의 diagnostics 정보를 LLM에 피드백으로 던져 최대 2회 자가 수정을 수행하며, 검증 통과한 경우에만 `COUPON_VALIDATION` 또는 `REFINEMENT` 상태로 전이시킨다.
+- **중복 제출 방어**:
+  - `POST /api/v1/jobs/{job_id}/events` 처리 시, 데이터베이스 `making_states` 테이블에 낙관적 락(Optimistic Locking, version 번호 비교)을 적용하여 분산 환경이나 클라이언트 오동작에 의한 동일 트랜잭션 중복 전이 처리를 차단한다.
+  - HTTP Header에 전송된 `X-Idempotency-Key`를 캐시/DB 레벨에서 대조하여 이미 동일 멱등키로 완료된 요청의 경우 상태 전이를 재실행하지 않고 이전 성공의 캐싱 응답을 반환한다.
+
+---
+
+### 8. R-18 전용 SSE 이벤트 및 Artifact Role 명시
+
+#### R-18 전용 SSE 이벤트 구조
+클라이언트와 실시간 상태 동기화를 위해 다음 두 가지 신규 이벤트를 추가 제공한다.
+1. `MAKING_STATE_CHANGED`: Making State가 변경될 때마다 발행하는 이벤트.
+   - Payload:
+     ```json
+     {
+       "job_id": "UUID",
+       "previous_state": "MEASUREMENT_PLAN",
+       "current_state": "COUPON_DESIGN",
+       "timestamp": "ISO_8601_Timestamp"
+     }
+     ```
+2. `USER_INPUT_REQUIRED`: Job State가 `WAITING_FOR_USER`로 변경되고 사용자의 답변이나 승인이 대기 중일 때 발행하는 이벤트.
+   - Payload:
+     ```json
+     {
+       "job_id": "UUID",
+       "current_making_state": "MEASUREMENT_PLAN" | "COUPON_VALIDATION" | "REFINEMENT",
+       "required_dimensions": ["cable_diameter", "watch_body_width"],
+       "questionnaire": "되묻기용 질문 텍스트 내용",
+       "timestamp": "ISO_8601_Timestamp"
+     }
+     ```
+
+#### Artifact Role 메타데이터 정의
+오픈스캐드 CLI 실행 시 다수의 파일이 생성되므로, DB의 `artifacts` 테이블에 `artifact_role` 컬럼(String/Enum)을 추가하여 각 파일의 용도와 승격 순위를 명시한다.
+- `TEST_COUPON`: 공차 맞춤용 임시 테스트 코드 및 STL 파일 (`test_coupon.scad`, `test_coupon.stl`).
+- `MAIN_DESIGN`: 최종 제품용 소스 코드 및 STL 모델 파일 (`model.scad`, `output.stl`).
+- `ASSEMBLY_GUIDE`: 본 제품 조립 및 제작 가이드라인 문서 (`assembly_guide.md`).
+- `RENDER_PREVIEW`: OpenSCAD CLI에 의해 렌더링된 뷰어용 이미지 파일 (`preview.png`).
+
+---
+
+#### Verification Expectations
+- **Automation Required**: Yes
+- **Expected Test Level**: unit/integration
+- **Required Test Evidence**:
+  - `tests/test_unit_aimaking.py`를 생성하여:
+    - 단계별 상태 전이(State Transition) 테스트: `INIT` -> `MEASUREMENT_PLAN` -> `COUPON_DESIGN` -> `COUPON_VALIDATION` -> `MEASUREMENT_PLAN` (Reject로 인한 되감기) 흐름 검증.
+    - `is_coupon_required` 판단 분기 조건 및 쿠폰 스킵 검증.
+    - 컴파일 실패 시 1차 자가 수정 루프(최대 2회)가 트리거되고 최종 실패 시 `FAILED` 상태로 정상 전이되는지 검증.
+    - 동일 `X-Idempotency-Key` 헤더로 피드백 중복 요청 시 멱등한 결과 반환 검증.
+    - `PromptBuilder`의 금지/허용 컨텍스트 Substring Assertion 검증.
+    - `WAITING_FOR_USER` 전이 시 백엔드 대기열 게이트 슬롯 해제 여부 검증.
+    - `MAKING_STATE_CHANGED` 및 `USER_INPUT_REQUIRED` SSE 발행 이벤트 바디 검증.
+    - 아티팩트 메타데이터에 지정된 `artifact_role` 일치 여부 검증.
+

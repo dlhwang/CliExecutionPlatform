@@ -1,8 +1,11 @@
+import logging
 import shutil
 import uuid
 from pathlib import Path
 from uuid import UUID
 from storage.interface import StorageService
+
+logger = logging.getLogger(__name__)
 
 class LocalStorageService(StorageService):
     def __init__(self, base_dir: Path | str | None = None):
@@ -21,6 +24,7 @@ class LocalStorageService(StorageService):
         """
         # 1. 1차적인 경로 탐색 문자열 검사
         if "../" in relative_path or "..\\" in relative_path or relative_path.startswith("/") or relative_path.startswith("\\"):
+            logger.warning(f"[ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED] Path traversal characters detected in relative_path: {relative_path}")
             raise PermissionError("Access Denied: Path traversal attempt detected.")
 
         # 2. 지정된 Job의 기본 디렉토리 (jobs/{job_id}/ 또는 artifacts/{job_id}/)
@@ -29,8 +33,23 @@ class LocalStorageService(StorageService):
         # 3. 최종 경로 결합 및 resolve
         target_path = (base_job_dir / relative_path).resolve()
         
+        logger.debug(f"[_validate_safe_path] Resolved base_job_dir={base_job_dir}, target_path={target_path}")
+        
         # 4. 최종 경로가 기본 디렉토리의 하위에 위치하는지 확인
-        if not target_path.is_relative_to(base_job_dir):
+        try:
+            is_sub = target_path.is_relative_to(base_job_dir)
+        except ValueError as e:
+            logger.warning(
+                f"[ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED] is_relative_to ValueError: {e}. "
+                f"target_path={target_path}, base_job_dir={base_job_dir}"
+            )
+            raise PermissionError("Access Denied: Path traversal attempt detected.") from e
+            
+        if not is_sub:
+            logger.warning(
+                f"[ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED] target_path is not relative to base_job_dir. "
+                f"target_path={target_path}, base_job_dir={base_job_dir}"
+            )
             raise PermissionError("Access Denied: Path traversal attempt detected.")
             
         return target_path
@@ -96,22 +115,33 @@ class LocalStorageService(StorageService):
         shutil.copyfile(source, target)
 
     def save_artifact(self, job_id: UUID, relative_path: str) -> None:
-        # jobs/ 디렉토리 내 원본 파일
-        src_path = self._validate_safe_path(job_id, relative_path, "jobs")
-        if not src_path.exists() or not src_path.is_file():
-            raise FileNotFoundError(f"Source file not found for artifact: {relative_path} in job {job_id}")
+        logger.info(f"[ARTIFACT_COPY_STARTED] Saving artifact for job_id={job_id}, path={relative_path}")
+        try:
+            # jobs/ 디렉토리 내 원본 파일
+            src_path = self._validate_safe_path(job_id, relative_path, "jobs")
+            if not src_path.exists() or not src_path.is_file():
+                logger.error(f"[ARTIFACT_COPY_FAILED] Source file not found for artifact: {relative_path} in job {job_id}. src_path={src_path}")
+                raise FileNotFoundError(f"Source file not found for artifact: {relative_path} in job {job_id}")
+                
+            # artifacts/ 디렉토리 내 타겟 파일
+            dest_path = self._validate_safe_path(job_id, relative_path, "artifacts")
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
             
-        # artifacts/ 디렉토리 내 타겟 파일
-        dest_path = self._validate_safe_path(job_id, relative_path, "artifacts")
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        shutil.copyfile(src_path, dest_path)
+            logger.info(f"[save_artifact] Copying from {src_path} to {dest_path}")
+            shutil.copyfile(src_path, dest_path)
+            logger.info(f"[ARTIFACT_COPY_COMPLETED] Successfully saved artifact: {relative_path}")
+        except Exception as e:
+            logger.error(f"[ARTIFACT_COPY_FAILED] Failed to copy artifact {relative_path} for job {job_id}: {e}")
+            raise
 
     def check_artifact_exists(self, job_id: UUID, filename: str) -> bool:
         try:
             target_path = self._validate_safe_path(job_id, filename, "artifacts")
-            return target_path.exists() and target_path.is_file()
-        except PermissionError:
+            exists = target_path.exists() and target_path.is_file()
+            logger.info(f"[check_artifact_exists] job_id={job_id}, filename={filename}, target_path={target_path}, exists={exists}")
+            return exists
+        except PermissionError as e:
+            logger.warning(f"[ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED] PermissionError checking artifact for job_id={job_id}, filename={filename}: {e}")
             return False
 
     def get_artifact_path(self, job_id: UUID, filename: str) -> Path:

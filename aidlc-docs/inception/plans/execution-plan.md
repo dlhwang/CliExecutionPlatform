@@ -1,28 +1,30 @@
-# Execution Plan - FEATURE R-18 (AI-MAKING multi-turn SCAD)
+# Execution Plan - HOTFIX R-17-LOGGING (아티팩트 생명주기 로깅 및 경로 검증 개선)
 
-본 문서는 AI-MAKING 워크플로우에 기반한 멀티턴 CAD/SCAD 생성 기능의 설계 및 검토 작업을 위한 실행 계획을 정의합니다.
+본 문서는 Mac Docker UI 및 로컬 개발 환경에서의 아티팩트 다운로드 실패 원인을 진단하고, 아티팩트 생명주기를 완벽히 추적할 수 있도록 11가지의 상세 이벤트 로그 마커를 보강하기 위한 핫픽스 실행 계획을 정의합니다.
 
 ## Detailed Analysis Summary
 
 ### Transformation Scope (Brownfield Only)
-- **Transformation Type**: Application & Architectural Design (기존 오케스트레이터 구조에 단계별 상태 머신 및 컨텍스트 분할 주입 구조 설계)
+- **Transformation Type**: Bug Fix / Diagnostic Enhancement (로깅 강화 및 경로 검증 디버그 정보 보강)
 - **Primary Changes**: 
-  - AI-MAKING 상태 머신 전이 구조 기획
-  - 세부 단계별 컨텍스트 요약 및 토큰/지식 최적화(Context Pruning & Knowledge Injection) 설계
-  - 실측 측정값(Measured Specs) 획득 대화 흐름 및 테스트 쿠폰(`test_coupon.scad`) 검증 루프 설계
-- **Related Components**: `orchestrator/service.py`, `llm/client.py`, `llm/validator.py`, `jobs/router.py`, `database.py`
+  - `storage/local.py`의 `_validate_safe_path`와 `check_artifact_exists`에 11가지 라이프사이클 마커 로깅 및 경로 검증 실패 상세 디버깅 경고 로그 주입.
+  - `jobs/service.py`의 `ArtifactService.get_artifact_for_download`와 `register_artifact`에 로깅 마커 적용 및 `ValueError` / `is_relative_to` 실패 시 상세 경로 정보(`target_path`, `base_job_dir`)를 포함한 디버그 로깅 적용.
+  - `jobs/router.py` 내의 다운로드 엔드포인트에 진입(`ARTIFACT_DOWNLOAD_REQUESTED`) 및 완료(`ARTIFACT_DOWNLOAD_READY`) 마커 적용.
+  - `runner/service.py` 내 CLI 실행 후 파일 생성 및 이관 완료 시점에 `ARTIFACT_GENERATION_COMPLETED` 마커 적용.
+  - 호스트 절대 서버 경로가 외부 에러 본문으로 유출되지 않도록 기존 보안 수칙 완벽 유지.
+- **Related Components**: `storage/local.py`, `jobs/service.py`, `jobs/router.py`, `runner/service.py`
 
 ### Change Impact Assessment
-- **User-facing changes**: Yes — 사용자가 UI에서 현재 설계 진행 단계(요구사항 분석, 실측 수집, 테스트 쿠폰 피드백, 최종 본 설계)를 추적하고 각 단계마다 승인/피드백을 제출하는 멀티턴 대화형 UX로 변경됩니다.
-- **Structural changes**: Yes — 기존 단일 `Job` 처리 흐름에서 하위 상태(Sub-state) 또는 하위 트랜잭션 전이를 관리하는 상태 머신 모델이 추가됩니다.
-- **Data model changes**: Yes — Job의 상태 세부 정보를 저장하기 위한 `making_states` 테이블 및 치수 측정 기록 등의 스키마 확장이 필요합니다.
-- **API changes**: Yes — 각 단계의 상태 조회 및 피드백/승인 제출을 위한 API 엔드포인트가 추가 설계됩니다.
-- **NFR impact**: Yes — 프롬프트 조립 시 컨텍스트를 요약하고 단계별 전용 지식만 로드함으로써 LLM 입력 토큰 및 API 호출 비용을 최적화합니다.
+- **User-facing changes**: No — 단, 다운로드 실패 시 백엔드 컨테이너의 콘솔 로그 상에서 실패 원인(경로 검증 실패인지, 물리 파일 누락인지 등)과 실제 분석된 경로 데이터를 실시간으로 파악 가능하게 되어 디버깅 사용성이 극대화됩니다.
+- **Structural changes**: No — 로깅 및 예외 발생 시의 세부 정보 수집 코드만 안전하게 보강됩니다.
+- **Data model changes**: No
+- **API changes**: No
+- **NFR impact**: Yes — 다운로드 기능의 관측성(Observability) 및 개발 운영 유지보수성이 향상됩니다.
 
 ### Risk Assessment
-- **Risk Level**: Medium — 시스템 아키텍처 및 DB 스키마에 큰 영향을 주나, 실제 구현 전 설계 및 타당성 검토 단계를 먼저 진행하므로 설계 리스크는 낮습니다.
-- **Rollback Complexity**: Moderate
-- **Testing Complexity**: Moderate
+- **Risk Level**: Low — 단순 로깅 추가 및 경로 resolve 과정의 디버그 프린트 수준이므로 시스템에 악영향을 주지 않고 안전합니다.
+- **Rollback Complexity**: Easy
+- **Testing Complexity**: Simple
 
 ---
 
@@ -39,45 +41,44 @@ flowchart TD
         RA["Requirements Analysis<br/><b>COMPLETED</b>"]
         US["User Stories<br/><b>SKIPPED</b>"]
         WP["Workflow Planning<br/><b>IN PROGRESS</b>"]
-        AD["Application Design<br/><b>EXECUTE</b>"]
-        UG["Units Generation<br/><b>EXECUTE</b>"]
+        AD["Application Design<br/><b>SKIPPED</b>"]
+        UG["Units Generation<br/><b>SKIPPED</b>"]
     end
     
     subgraph CONSTRUCTION["🟢 CONSTRUCTION PHASE"]
-        FD["Functional Design<br/><b>EXECUTE</b>"]
+        FD["Functional Design<br/><b>SKIPPED</b>"]
         NFRA["NFR Requirements<br/><b>SKIPPED</b>"]
         NFRD["NFR Design<br/><b>SKIPPED</b>"]
         ID["Infrastructure Design<br/><b>SKIPPED</b>"]
-        CG["Code Generation<br/><b>SKIPPED</b>"]
-        BT["Build and Test<br/><b>SKIPPED</b>"]
+        CG["Code Generation<br/>(Planning + Generation)<br/><b>EXECUTE</b>"]
+        BT["Build and Test<br/><b>EXECUTE</b>"]
     end
     
     subgraph OPERATIONS["🟡 OPERATIONS PHASE"]
-        OPS["Operations<br/><b>SKIPPED</b>"]
+        OPS["Operations<br/><b>PLACEHOLDER</b>"]
     end
     
     Start --> WD
     WD --> RA
     RA --> WP
-    WP --> AD
-    AD --> UG
-    UG --> FD
-    FD --> End(["Complete"])
+    WP --> CG
+    CG --> BT
+    BT --> End(["Complete"])
     
     style WD fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
     style RA fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
     style WP fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000
-    style AD fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000
-    style UG fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000
-    style FD fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000
+    style CG fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000
+    style BT fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000
     
     style RE fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
     style US fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
+    style AD fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
+    style UG fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
+    style FD fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
     style NFRA fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
     style NFRD fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
     style ID fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
-    style CG fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
-    style BT fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
     style OPS fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
     style Start fill:#CE93D8,stroke:#6A1B9A,stroke-width:3px,color:#000
     style End fill:#CE93D8,stroke:#6A1B9A,stroke-width:3px,color:#000
@@ -93,19 +94,19 @@ Phase 1: INCEPTION
 - Requirements Analysis (COMPLETED)
 - User Stories (SKIPPED)
 - Workflow Planning (IN PROGRESS)
-- Application Design (EXECUTE)
-- Units Generation (EXECUTE)
+- Application Design (SKIPPED)
+- Units Generation (SKIPPED)
 
 Phase 2: CONSTRUCTION
-- Functional Design (EXECUTE)
+- Functional Design (SKIPPED)
 - NFR Requirements (SKIPPED)
 - NFR Design (SKIPPED)
 - Infrastructure Design (SKIPPED)
-- Code Generation (SKIPPED)
-- Build and Test (SKIPPED)
+- Code Generation (EXECUTE)
+- Build and Test (EXECUTE)
 
 Phase 3: OPERATIONS
-- Operations (SKIPPED)
+- Operations (PLACEHOLDER)
 ```
 
 ---
@@ -115,27 +116,27 @@ Phase 3: OPERATIONS
 ### 🔵 INCEPTION PHASE
 - [x] Workspace Detection (COMPLETED)
 - [x] Reverse Engineering (SKIPPED)
-  - **Rationale**: 기존 설계 아키텍처는 이미 문서화되어 있으며, 본 요건은 신규 개념 설계에 초점을 맞추므로 분석만으로 충분합니다.
+  - **Rationale**: 기존 역공학 산출물이 유효하며 로깅 보강에 따른 설계 구조 변동이 극히 적어 생략합니다.
 - [x] Requirements Analysis (COMPLETED)
 - [ ] Workflow Planning (IN PROGRESS)
-- [ ] Application Design - **EXECUTE**
-  - **Rationale**: 멀티턴 상태 제어 및 토큰/지식 최적화를 위한 지식 주입 구조(State Machine & Prompt Builder)에 대한 상세 설계가 필수적입니다.
-- [ ] Units Generation - **EXECUTE**
-  - **Rationale**: 상태 관리 DB 스키마, 단계별 프롬프트 제어기, 테스트 쿠폰 실행기 등으로 작업을 분할해야 합니다.
+- [ ] Application Design - **SKIP**
+  - **Rationale**: 기존 모듈 아키텍처를 그대로 따르며 추가적인 컴포넌트 생성이 불필요합니다.
+- [ ] Units Generation - **SKIP**
+  - **Rationale**: 단일 핫픽스 범위로 작업 유닛 분할이 불필요합니다.
 
 ### 🟢 CONSTRUCTION PHASE
-- [ ] Functional Design - **EXECUTE**
-  - **Rationale**: 상태 데이터 모델링 및 구체적인 데이터 스키마 설계를 확정하기 위해 필요합니다.
+- [ ] Functional Design - **SKIP**
+  - **Rationale**: 데이터 스키마 및 비즈니스 전이 규칙의 설계 변동이 없으므로 생략합니다.
 - [ ] NFR Requirements - **SKIP**
-  - **Rationale**: 기존 플랫폼의 NFR 기준(Timeout, 속도 제한, 예외 로그 등)을 그대로 준수하므로 생략합니다.
+  - **Rationale**: 신규 비기능 요건의 수립이 불필요합니다.
 - [ ] NFR Design - **SKIP**
-  - **Rationale**: 인프라 및 NFR 변경 사항이 없으므로 생략합니다.
+  - **Rationale**: 기존 보안/성능 설계 패턴을 그대로 적용하므로 생략합니다.
 - [ ] Infrastructure Design - **SKIP**
-  - **Rationale**: 기존 인프라(FastAPI, PostgreSQL)를 그대로 사용하므로 생략합니다.
-- [ ] Code Generation - **SKIP**
-  - **Rationale**: 사용자의 요청("바로 개발하면 안되고 검토를 해야하는디... 방향을 잡아보자")에 맞춰 이번 라이프사이클은 설계 및 검토 명세 산출까지만 완료합니다.
-- [ ] Build and Test - **SKIP**
-  - **Rationale**: 실제 코드 작성이 이루어지지 않으므로 생략합니다.
+  - **Rationale**: 배포 및 마운트 인프라 환경의 변경이 없으므로 생략합니다.
+- [ ] Code Generation - **EXECUTE**
+  - **Rationale**: 11가지 로깅 마커 삽입 및 상세 경로 예외 추적 로그를 구현합니다.
+- [ ] Build and Test - **EXECUTE**
+  - **Rationale**: 기존 95개 회귀 테스트 성공 확인 및 로깅 마커 유효성 검증을 수행합니다.
 
 ### 🟡 OPERATIONS PHASE
 - [ ] Operations - **SKIP** (PLACEHOLDER)
@@ -146,19 +147,22 @@ Phase 3: OPERATIONS
 
 | Requirement/Story | Acceptance Criteria or Contract | Required Test Evidence | Test Level | Planned Test File or Scenario | Required Result |
 | --- | --- | --- | --- | --- | --- |
-| R-18 | 상태 머신 전이 | 상태 전이 DB 모델 및 API 모의 실행 | unit/integration | `tests/test_unit_aimaking.py` | Pass |
-| R-18 | 토큰 최적화 및 지식 분할 | 대화 전체가 아닌 요약 상태 및 단계별 규칙만 주입 | unit | `tests/test_unit_aimaking.py` | Pass |
-| R-18 | 자연어 치수 획득 | 누락 치수 감지 프롬프트 정상 빌드 검증 | unit | `tests/test_unit_aimaking.py` | Pass |
+| R-17-LOGGING | 11개 로그 마커 출력 | 테스트 수행 시 콘솔 로그 내 `[MARKER]` 정상 발행 확인 | unit/integration | `tests/test_unit_2.py` 내 다운로드 및 복사 테스트 케이스 | Pass |
+| R-17-LOGGING | 경로 검증 실패 시 상세 로그 및 호스트 노출 차단 | 경로 위반 테스트 실행 시 `[ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED]` 마커 및 target_path, base_job_dir이 서버 로그에만 로깅되고, HTTP 에러 본문에는 절대 서버 경로가 없음 검증 | unit/integration/security | `tests/test_unit_2.py` 내 traversal 및 prefix-bypass 거부 테스트 케이스 | Pass |
+| 회귀 방지 | 기존 95개 테스트 유지 | `pytest`를 통한 95개 전체 테스트 스위트의 성공 통과 | unit/integration | 전체 테스트 스위트 | Pass |
 
 ---
 
 ## Estimated Timeline
-- **Total Phases**: Inception (Application Design, Units Generation) & Construction (Functional Design)
-- **Estimated Duration**: 1 hour (설계 검토 및 문서화 완료 기준)
+- **Total Phases**: Inception (Workflow Planning) & Construction (Code Generation, Build and Test)
+- **Estimated Duration**: 30 minutes (로깅 코드 구현 및 로컬 회귀 테스트 완료 기준)
 
 ## Success Criteria
-- **Primary Goal**: AI-MAKING 규칙 기반 멀티턴 SCAD 생성 기능의 논리 아키텍처 및 상세 설계 사양서 발행.
+- **Primary Goal**: 아티팩트 라이프사이클의 11가지 로깅 마커 주입 및 디버깅을 위한 경로 상세 로깅 보강 완료.
 - **Key Deliverables**: 
-  - `application-design.md` (상태 전이 흐름 및 토큰/지식 최적화 컴포넌트 아키텍처)
-  - `unit-of-work.md` (작업 단위 명세)
-  - `functional-design/making-state-model.md` (상태 데이터베이스 스키마 및 가이드라인 스키마)
+  - `storage/local.py` (마커 로깅 및 경로 검증 경고 추가)
+  - `jobs/service.py` (ArtifactService 마커 로깅 및 경로 예외 로깅 추가)
+  - `jobs/router.py` (라우터 단 마커 로깅 추가)
+  - `runner/service.py` (생성 완료 마커 로깅 추가)
+  - `tests/test_unit_2.py` / `tests/test_unit_3.py` (로깅 정상 출력 여부 및 회귀 차단 검증)
+- **Quality Gates**: 기존 95개 테스트 케이스의 100% Pass 완료.

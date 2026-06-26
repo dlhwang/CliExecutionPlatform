@@ -3,7 +3,7 @@
 ## Project Information
 - **Project Type**: Brownfield (Hotfix Mode)
 - **Start Date**: 2026-06-18T16:09:24+09:00
-- **Current Stage**: INCEPTION - Workflow Planning Complete
+- **Current Stage**: HOTFIX R-17-LOGGING - Build and Test Complete
 
 ## Extension Configuration
 | Extension | Enabled | Decided At |
@@ -12,9 +12,9 @@
 | Property-Based Testing | No | Requirements Analysis |
 
 ## Execution Plan Summary
-- **Current Feature**: FEATURE R-18 (AI-MAKING 워크플로우 기반 multi-turn SCAD 생성 기능 설계)
-- **Stages to Execute**: Requirements Analysis, Workflow Planning, Application Design, Units Generation, Functional Design
-- **Stages to Skip**: Reverse Engineering, User Stories, NFR Requirements, NFR Design, Infrastructure Design, Code Generation, Build and Test, Operations
+- **Current Feature**: HOTFIX R-17-LOGGING (아티팩트 생명주기 로깅 및 경로 검증 개선)
+- **Stages to Execute**: Requirements Analysis, Workflow Planning, Code Generation, Build and Test, Operations
+- **Stages to Skip**: Reverse Engineering, User Stories, Application Design, Units Generation, Functional Design, NFR Requirements, NFR Design, Infrastructure Design
 
 ## Stage Progress
 
@@ -175,11 +175,20 @@
 - [ ] Units Generation
 - [ ] Functional Design
 
-## Current Status
-- **Lifecycle Phase**: INCEPTION
-- **Current Stage**: Application Design
-- **Next Stage**: Application Design
+### HOTFIX R-17-LOGGING (아티팩트 생명주기 로깅 및 경로 검증 개선)
+- [x] Workspace Detection (Completed: 2026-06-26T09:18:47+09:00)
+- [x] Requirements Analysis (Completed: 2026-06-26T09:26:31+09:00)
+- [x] Workflow Planning (Completed: 2026-06-26T09:28:05+09:00)
+- [x] Code Generation (Completed: 2026-06-26T09:32:00+09:00)
+- [x] Build and Test (Completed: 2026-06-26T09:33:00+09:00)
+- [x] Operations - PLACEHOLDER (Completed: 2026-06-26T09:33:00+09:00)
 
-- **R-15A/B/C Completion Note**: 2026-06-22T17:00:05+09:00 전체 79개 테스트와 Python compileall이 통과했습니다. Docker CLI 부재로 실제 container acceptance smoke는 N/A이며 운영 배포 전 조건으로 남습니다.
+## Current Status
+- **Lifecycle Phase**: HOTFIX R-17-LOGGING
+- **Current Stage**: Operations - PLACEHOLDER
+- **Next Stage**: Operations - PLACEHOLDER
+
+- **R-15A/B/C Completion Note**: 2026-06-22T17:00:05+09:00 전체 79개 테스트와 Python compileall이 통과했습니다. Docker CLI 부재로 실제 container acceptance smoke is N/A이며 운영 배포 전 조건으로 남습니다.
 - **R-16 Completion Note**: 2026-06-23T10:15:00+09:00 전체 92개 테스트가 성공적으로 통과하고 빌드 및 테스트 지침서(build-instructions.md, unit-test-instructions.md, integration-test-instructions.md, performance-test-instructions.md, security-test-instructions.md, build-and-test-summary.md)가 작성 완료되었으며, 사용자의 최종 승인을 받아 R-16 아티팩트 다운로드 기능 추가 라이프사이클이 완결되었습니다.
 - **R-17 Completion Note**: 2026-06-25T16:50:45+09:00 전체 95개 테스트(신규 R-17 검증 3개 포함)가 통과하였습니다. Job ID 기반의 안전한 아티팩트 목록 조회 API(GET /api/v1/jobs/{job_id}/artifacts) 추가가 완료되었으며, 사용자 최종 승인을 획득하여 R-17 라이프사이클이 완결되었습니다.
+- **R-17-LOGGING Completion Note**: 2026-06-26T09:33:00+09:00 아티팩트 라이프사이클의 11가지 로깅 마커 주입 및 디버깅을 위한 경로 검증부 상세 예외 로깅을 완료하고, 신규 작성된 캡처 테스트를 포함한 총 96개 테스트 케이스가 성공적으로 100% 통과함을 확인하여 최종 라이프사이클을 완결함.

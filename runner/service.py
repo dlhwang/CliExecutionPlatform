@@ -18,11 +18,14 @@ import shutil
 import sys
 import tempfile
 import uuid
+import logging
 from collections import deque
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy.orm import Session
 
@@ -319,6 +322,7 @@ class CLIExecutionRunner:
                         workspace_target.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copyfile(f, workspace_target)
 
+            logger.info(f"[ARTIFACT_GENERATION_COMPLETED] CLI output artifacts successfully copied to workspace for job_id={job_id}")
         return exit_code
 
     def _resolve_job_workspace(self, job_id: uuid.UUID) -> Path:

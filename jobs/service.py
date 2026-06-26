@@ -1,3 +1,4 @@
+import logging
 import mimetypes
 from pathlib import PurePosixPath, Path
 from sqlalchemy.orm import Session
@@ -20,6 +21,8 @@ class RefinementConflictError(RuntimeError):
 
 class RefinementContextTooLargeError(RuntimeError):
     pass
+
+logger = logging.getLogger(__name__)
 
 class JobService:
     """
@@ -102,6 +105,7 @@ class ArtifactService:
         self.storage_service = storage_service
 
     def register_artifact(self, job_id: UUID, relative_path: str) -> Artifact:
+        logger.info(f"[ARTIFACT_METADATA_CREATE_STARTED] Registering artifact for job_id={job_id}, path={relative_path}")
         # 1. 논리 검증
         if not relative_path or not relative_path.strip():
             raise ArtifactPermissionError("Access Denied: Empty path is not allowed.")
@@ -138,27 +142,33 @@ class ArtifactService:
         )
         self.db.add(artifact)
         self.db.flush()  # DB ID 생성을 위해 flush
+        logger.info(f"[ARTIFACT_METADATA_CREATE_COMPLETED] Metadata created for artifact: id={artifact.id}, relative_path={relative_path}")
         return artifact
 
     def get_artifact_for_download(self, artifact_id: UUID) -> tuple[Path, str, str]:
         # 1. DB 조회
         artifact = self.db.query(Artifact).filter(Artifact.id == artifact_id).first()
         if not artifact:
+            logger.warning(f"[ARTIFACT_DOWNLOAD_METADATA_NOT_FOUND] Artifact not found in DB for ID: {artifact_id}")
             raise ArtifactNotFoundError("Artifact not found in database.")
 
         # 2. 논리 검증
         relative_path = artifact.relative_path
         if not relative_path or not relative_path.strip():
+            logger.warning(f"[ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED] Empty relative path for artifact ID: {artifact_id}")
             raise ArtifactPermissionError("Access Denied: Empty path is not allowed.")
         if "\\" in relative_path:
+            logger.warning(f"[ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED] Backslash in path for artifact ID: {artifact_id}. path={relative_path}")
             raise ArtifactPermissionError("Access Denied: Windows backslashes are not allowed.")
         
         posix_path = PurePosixPath(relative_path)
         if posix_path.is_absolute():
+            logger.warning(f"[ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED] Absolute path for artifact ID: {artifact_id}. path={relative_path}")
             raise ArtifactPermissionError("Access Denied: Absolute paths are not allowed.")
             
         segments = relative_path.replace("\\", "/").split("/")
         if any(s in (".", "..") or not s for s in segments):
+            logger.warning(f"[ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED] Invalid segments in path for artifact ID: {artifact_id}. path={relative_path}")
             raise ArtifactPermissionError("Access Denied: Invalid path segments (., .. or empty) are not allowed.")
 
         # 3. 물리 검증
@@ -166,13 +176,30 @@ class ArtifactService:
         base_job_dir = (base_dir / "jobs" / str(artifact.job_id)).resolve()
         target_path = (base_job_dir / relative_path).resolve()
 
-        if not target_path.is_relative_to(base_job_dir):
+        logger.debug(f"[get_artifact_for_download] Resolved base_job_dir={base_job_dir}, target_path={target_path}")
+
+        try:
+            is_sub = target_path.is_relative_to(base_job_dir)
+        except ValueError as e:
+            logger.warning(
+                f"[ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED] is_relative_to ValueError: {e}. "
+                f"target_path={target_path}, base_job_dir={base_job_dir}"
+            )
+            raise ArtifactPermissionError("Access Denied: Path traversal attempt detected.") from e
+
+        if not is_sub:
+            logger.warning(
+                f"[ARTIFACT_DOWNLOAD_PATH_VALIDATION_FAILED] target_path is not relative to base_job_dir. "
+                f"target_path={target_path}, base_job_dir={base_job_dir}"
+            )
             raise ArtifactPermissionError("Access Denied: Path traversal attempt detected.")
 
         # 4. 파일 존재 여부 및 일반 파일 여부 확인
         if not target_path.exists() or not target_path.is_file():
+            logger.warning(f"[ARTIFACT_DOWNLOAD_FILE_NOT_FOUND] Physical file not found or is not a regular file for artifact ID: {artifact_id}. target_path={target_path}")
             raise ArtifactNotFoundError("Physical file not found or is not a regular file.")
 
+        logger.info(f"[ARTIFACT_DOWNLOAD_READY] Artifact download validated and ready: artifact_id={artifact_id}, target_path={target_path}")
         return target_path, artifact.content_type, artifact.filename
 
     def get_artifacts_by_job_id(self, job_id: UUID) -> List[Artifact]:

@@ -117,6 +117,7 @@ def download_artifact(
     성공한 Job에 한하여 생성된 최종 아티팩트(.stl, .png 등) 파일을 안전하게 다운로드합니다.
     - Directory Traversal 침투 방어가 강제 적용됩니다.
     """
+    logger.info(f"[ARTIFACT_DOWNLOAD_REQUESTED] Download requested by filename: job_id={job_id}, filename={filename}")
     job_service = JobService(db, storage_service)
     
     # 1. DB에서 Job 유효성 검증
@@ -157,6 +158,7 @@ def download_artifact(
             
         file_path = storage_service.get_artifact_path(job_id, filename)
         
+        logger.info(f"[ARTIFACT_DOWNLOAD_READY] Artifact download ready by filename: job_id={job_id}, filename={filename}, path={file_path}")
         # 파일 미디어 타입 정의 생략하고 파일명을 명시하여 다운로드 처리
         return FileResponse(
             path=str(file_path),
@@ -176,6 +178,7 @@ def download_artifact(
             }
         )
     except FileNotFoundError:
+        logger.warning(f"[ARTIFACT_DOWNLOAD_FILE_NOT_FOUND] Physical file not found for job_id={job_id}, filename={filename}")
         # 혹여나 내부 처리 중 파일이 소실된 경우 404 반환
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -245,6 +248,7 @@ def download_artifact_by_id(
     db: Session = Depends(get_db),
     storage_service: StorageService = Depends(get_storage_service)
 ):
+    logger.info(f"[ARTIFACT_DOWNLOAD_REQUESTED] Download requested by ID: artifact_id={artifact_id}")
     from jobs.service import ArtifactService, ArtifactNotFoundError, ArtifactPermissionError
     
     artifact_service = ArtifactService(db, storage_service)
